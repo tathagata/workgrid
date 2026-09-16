@@ -1,0 +1,10 @@
+node_modules
+dist
+.next
+.git
+.wrangler
+.sites-runtime
+outputs
+work
+npm-debug.log*
+.DS_Store
