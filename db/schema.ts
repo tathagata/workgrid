@@ -1,13 +1,24 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const people = sqliteTable("people", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   role: text("role").notNull().default(""),
   color: text("color").notNull().default("#2f6f65"),
+  colorId: text("color_id"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const boardMetadata = sqliteTable("board_metadata", {
+  id: integer("id").primaryKey(),
+  revision: integer("revision").notNull().default(1),
+});
+
+export const boardSettings = sqliteTable("board_settings", {
+  id: integer("id").primaryKey(),
+  overfocusThreshold: real("overfocus_threshold").notNull().default(2.5),
 });
 
 export const tasks = sqliteTable("tasks", {
@@ -16,7 +27,13 @@ export const tasks = sqliteTable("tasks", {
   description: text("description").notNull().default(""),
   category: text("category").notNull().default("General"),
   color: text("color").notNull().default("#5b67a5"),
-  status: text("status", { enum: ["active", "hold", "archived"] }).notNull().default("active"),
+  colorId: text("color_id"),
+  lifecycle: text("lifecycle", { enum: ["active", "archived"] }).notNull().default("active"),
+  outcome: text("outcome", { enum: ["completed", "cancelled", "superseded"] }),
+  workflowChangedAt: text("workflow_changed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  revision: integer("revision").notNull().default(1),
+  sortOrder: integer("sort_order").notNull().default(0),
+  legacyStatus: text("legacy_status", { enum: ["active", "hold", "archived"] }),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
