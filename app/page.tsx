@@ -26,6 +26,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { TASK_PALETTE } from "@/lib/task-colors";
 import { PEOPLE_PALETTE } from "@/lib/people-colors";
+import { CommandPalette, ShortcutsDialog, useCommandBindings, useCommandDispatch } from "@/app/command-palette";
+import type { CommandContext, CommandDefinition } from "@/lib/commands";
 
 type Focus = "primary" | "secondary" | "tertiary";
 type WorkflowState = "unfocused" | "focused" | "archived";
@@ -223,19 +225,6 @@ function EditorDialog({ editor, tasks, people, onClose, onSubmit }: {
   );
 }
 
-function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const shortcuts = [["N", "New task"], ["Shift + N", "Add a person"], ["/", "Search tasks"],
-    ["A", "Archive selected task"], ["C", "Complete selected task"], ["R", "Restore selected task"], ["Esc", "Clear selection"], ["?", "Show this guide"]];
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="shortcut-dialog">
-        <DialogHeader><DialogTitle>Keyboard shortcuts</DialogTitle><DialogDescription>Shortcuts stay out of the way while you are typing in a field.</DialogDescription></DialogHeader>
-        <div className="shortcut-list">{shortcuts.map(([keys, label]) => <div key={keys}><span>{label}</span><kbd>{keys}</kbd></div>)}</div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export default function Home() {
   const [board, setBoard] = useState<BoardState | null>(null);
   const [error, setError] = useState("");
@@ -243,16 +232,19 @@ export default function Home() {
   const [statusFilter, setStatusFilter] = useState<WorkflowState>("unfocused");
   const [search, setSearch] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState>(null);
   const [deleteState, setDeleteState] = useState<DeleteState>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const { bindings, updateBindings, resetBindings } = useCommandBindings();
   const [dragging, setDragging] = useState<{ taskId: string; personId?: string } | null>(null);
   const [dropTarget, setDropTarget] = useState("");
   const [draggingPersonId, setDraggingPersonId] = useState<string | null>(null);
   const [draggingTaskOrderId, setDraggingTaskOrderId] = useState<string | null>(null);
   const [taskOrderDropId, setTaskOrderDropId] = useState<string | null>(null);
   const [personDropTarget, setPersonDropTarget] = useState<{ personId: string; edge: "before" | "after" } | null>(null);
-  const [orderAnnouncement, setOrderAnnouncement] = useState("");
+  const [announcement, setAnnouncement] = useState("");
   const [loadFilter, setLoadFilter] = useState<"all" | LoadState>("all");
   const [loadSort, setLoadSort] = useState<"canonical" | "highest" | "lowest">("canonical");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -268,6 +260,7 @@ export default function Home() {
   const assignments = useMemo(() => board?.assignments || [], [board]);
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const selectedTask = selectedTaskId ? taskById.get(selectedTaskId) : undefined;
+  const selectedPerson = selectedPersonId ? people.find((person) => person.id === selectedPersonId) : undefined;
 
   const runAction = useCallback(async (action: string, payload: Record<string, unknown>, successMessage?: string) => {
     setSaving(true);
@@ -286,21 +279,6 @@ export default function Home() {
     await runAction("restoreTask", { id: task.id, expectedRevision: task.revision }, "Task restored");
   }, [runAction]);
 
-  useEffect(() => {
-    const listener = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.matches("input, textarea, select, [contenteditable='true']")) { if (event.key === "Escape") target.blur(); return; }
-      if (event.key === "/") { event.preventDefault(); searchRef.current?.focus(); }
-      else if (event.key.toLowerCase() === "n") { event.preventDefault(); setEditor(event.shiftKey ? { kind: "person" } : { kind: "task" }); }
-      else if (event.key === "?") { event.preventDefault(); setShortcutsOpen(true); }
-      else if (event.key === "Escape") setSelectedTaskId(null);
-      else if (event.key.toLowerCase() === "a" && selectedTask && selectedTask.workflow.state !== "archived") void archiveTask(selectedTask);
-      else if (event.key.toLowerCase() === "c" && selectedTask && selectedTask.workflow.state !== "archived") void archiveTask(selectedTask, "completed");
-      else if (event.key.toLowerCase() === "r" && selectedTask && selectedTask.workflow.state === "archived") void restoreTask(selectedTask);
-    };
-    window.addEventListener("keydown", listener); return () => window.removeEventListener("keydown", listener);
-  }, [selectedTask, archiveTask, restoreTask]);
-
   const visibleTasks = tasks.filter((task) => {
     const query = search.trim().toLowerCase();
     return task.workflow.state === statusFilter && (!query || `${task.title} ${task.category} ${task.description}`.toLowerCase().includes(query));
@@ -316,11 +294,13 @@ export default function Home() {
     const data = { taskId, personId }; setDragging(data); event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("application/json", JSON.stringify(data)); event.dataTransfer.setData("text/plain", taskId);
   };
-  const assign = async (taskId: string, personId: string, focus: Focus) => {
+  const assign = useCallback(async (taskId: string, personId: string, focus: Focus) => {
     const prior = assignments.find((item) => item.taskId === taskId && item.personId === personId);
     await runAction("assign", { taskId, personId, focus }, prior ? `Moved to ${focus} focus` : `Added as ${focus} focus`);
-  };
-  const reorderPerson = async (person: Person, target: { beforePersonId?: string; afterPersonId?: string; position?: "first" | "last" }) => {
+    const person = people.find((item) => item.id === personId); const task = taskById.get(taskId);
+    if (person && task) setAnnouncement(`${person.name} set as ${focus} for ${task.title}.`);
+  }, [assignments, runAction, people, taskById]);
+  const reorderPerson = useCallback(async (person: Person, target: { beforePersonId?: string; afterPersonId?: string; position?: "first" | "last" }) => {
     await runAction("reorderPeople", { personId: person.id, ...target, expectedRevision: board?.revision });
     const nextPeople = target.position === "first" ? [person, ...people.filter((item) => item.id !== person.id)]
       : target.position === "last" ? [...people.filter((item) => item.id !== person.id), person]
@@ -328,9 +308,9 @@ export default function Home() {
     const position = target.position ? nextPeople.findIndex((item) => item.id === person.id) + 1
       : target.beforePersonId ? people.filter((item) => item.id !== person.id).findIndex((item) => item.id === target.beforePersonId) + 1
       : people.filter((item) => item.id !== person.id).findIndex((item) => item.id === target.afterPersonId) + 2;
-    setOrderAnnouncement(`${person.name} moved to position ${position} of ${people.length}.`);
-  };
-  const reorderTask = async (task: Task, target: { beforeTaskId?: string; afterTaskId?: string; position?: "first" | "last" }) => {
+    setAnnouncement(`${person.name} moved to position ${position} of ${people.length}.`);
+  }, [runAction, board?.revision, people]);
+  const reorderTask = useCallback(async (task: Task, target: { beforeTaskId?: string; afterTaskId?: string; position?: "first" | "last" }) => {
     if (search.trim()) { toast.info("Clear search before reordering tasks."); return; }
     await runAction("reorderTasks", { taskId: task.id, state: task.workflow.state, ...target, expectedRevision: board?.revision });
     const stateTasks = tasks.filter((item) => item.workflow.state === task.workflow.state);
@@ -338,8 +318,70 @@ export default function Home() {
     const position = target.position === "first" ? 1 : target.position === "last" ? stateTasks.length
       : target.beforeTaskId ? remaining.findIndex((item) => item.id === target.beforeTaskId) + 1
       : remaining.findIndex((item) => item.id === target.afterTaskId) + 2;
-    setOrderAnnouncement(`${task.title} moved to position ${position} of ${stateTasks.length} in ${task.workflow.state}.`);
+    setAnnouncement(`${task.title} moved to position ${position} of ${stateTasks.length} in ${task.workflow.state}.`);
+  }, [search, runAction, board?.revision, tasks]);
+
+  const selectTask = useCallback((task: Task) => {
+    setSelectedTaskId((current) => {
+      const next = current === task.id ? null : task.id;
+      setAnnouncement(next ? `${task.title} selected.` : "Task selection cleared.");
+      return next;
+    });
+  }, []);
+  const selectPerson = useCallback((person: Person) => {
+    setSelectedPersonId((current) => {
+      const next = current === person.id ? null : person.id;
+      setAnnouncement(next ? `${person.name} selected.` : "Person selection cleared.");
+      return next;
+    });
+  }, []);
+
+  const visibleTaskIndex = selectedTask ? visibleTasks.findIndex((item) => item.id === selectedTask.id) : -1;
+  const selectedPersonIndex = selectedPerson ? people.findIndex((item) => item.id === selectedPerson.id) : -1;
+  const hasSelectedAssignment = Boolean(selectedTask && selectedPerson
+    && assignments.some((item) => item.taskId === selectedTask.id && item.personId === selectedPerson.id));
+  const commandContext: CommandContext = {
+    hasTask: Boolean(selectedTask), hasPerson: Boolean(selectedPerson), taskArchived: selectedTask?.workflow.state === "archived",
+    canMoveTaskUp: visibleTaskIndex > 0, canMoveTaskDown: visibleTaskIndex >= 0 && visibleTaskIndex < visibleTasks.length - 1,
+    canMovePersonUp: selectedPersonIndex > 0, canMovePersonDown: selectedPersonIndex >= 0 && selectedPersonIndex < people.length - 1,
+    hasAssignment: hasSelectedAssignment, searchActive: Boolean(search.trim()),
   };
+
+  const runCommand = useCallback((command: CommandDefinition) => {
+    switch (command.id) {
+      case "palette.open": setPaletteOpen(true); break;
+      case "help.open": setShortcutsOpen(true); break;
+      case "search.focus": searchRef.current?.focus(); break;
+      case "selection.clear": setSelectedTaskId(null); setSelectedPersonId(null); setAnnouncement("Selection cleared."); break;
+      case "task.create": setEditor({ kind: "task" }); break;
+      case "task.edit": if (selectedTask) setEditor({ kind: "task", id: selectedTask.id }); break;
+      case "task.archive": if (selectedTask) void archiveTask(selectedTask); break;
+      case "task.complete": if (selectedTask) void archiveTask(selectedTask, "completed"); break;
+      case "task.restore": if (selectedTask) void restoreTask(selectedTask); break;
+      case "task.delete": if (selectedTask) setDeleteState({ kind: "task", id: selectedTask.id, name: selectedTask.title }); break;
+      case "task.moveUp": if (selectedTask && visibleTaskIndex > 0) void reorderTask(selectedTask, { beforeTaskId: visibleTasks[visibleTaskIndex - 1].id }); break;
+      case "task.moveDown": if (selectedTask && visibleTaskIndex >= 0 && visibleTaskIndex < visibleTasks.length - 1) void reorderTask(selectedTask, { afterTaskId: visibleTasks[visibleTaskIndex + 1].id }); break;
+      case "task.moveFirst": if (selectedTask) void reorderTask(selectedTask, { position: "first" }); break;
+      case "task.moveLast": if (selectedTask) void reorderTask(selectedTask, { position: "last" }); break;
+      case "person.create": setEditor({ kind: "person" }); break;
+      case "person.edit": if (selectedPerson) setEditor({ kind: "person", id: selectedPerson.id }); break;
+      case "person.delete": if (selectedPerson) setDeleteState({ kind: "person", id: selectedPerson.id, name: selectedPerson.name }); break;
+      case "person.moveUp": if (selectedPerson && selectedPersonIndex > 0) void reorderPerson(selectedPerson, { beforePersonId: people[selectedPersonIndex - 1].id }); break;
+      case "person.moveDown": if (selectedPerson && selectedPersonIndex >= 0 && selectedPersonIndex < people.length - 1) void reorderPerson(selectedPerson, { afterPersonId: people[selectedPersonIndex + 1].id }); break;
+      case "assignment.primary": case "assignment.secondary": case "assignment.tertiary":
+        if (selectedTask && selectedPerson) void assign(selectedTask.id, selectedPerson.id, command.id.split(".")[1] as Focus);
+        break;
+      case "assignment.remove":
+        if (selectedTask && selectedPerson) void runAction("unassign", { taskId: selectedTask.id, personId: selectedPerson.id }, "Assignment removed")
+          .then(() => setAnnouncement(`${selectedPerson.name} unassigned from ${selectedTask.title}.`));
+        break;
+      case "view.unfocused": setStatusFilter("unfocused"); break;
+      case "view.focused": setStatusFilter("focused"); break;
+      case "view.archived": setStatusFilter("archived"); break;
+      case "history.undo": break;
+    }
+  }, [selectedTask, selectedPerson, visibleTaskIndex, visibleTasks, selectedPersonIndex, people, archiveTask, restoreTask, runAction, reorderTask, reorderPerson, assign]);
+  useCommandDispatch(commandContext, bindings, runCommand);
 
   if (error) return (
     <main className="connection-screen"><div className="connection-card"><span className="connection-mark">WG</span>
@@ -355,11 +397,13 @@ export default function Home() {
           <div className="brand-lockup"><div className="brand-mark">WG</div><div><h1>Work distribution</h1><p>Current team focus</p></div></div>
           <div className="topbar-actions">
             <div className="save-state" aria-live="polite"><span className={saving ? "is-saving" : ""} />{saving ? "Saving…" : "Saved locally"}</div>
+            <Tooltip><TooltipTrigger asChild><Button variant="outline" onClick={() => setPaletteOpen(true)} aria-label="Open command palette"><Search /> Commands</Button></TooltipTrigger><TooltipContent>Command palette · <kbd>⌘K</kbd></TooltipContent></Tooltip>
             <Tooltip><TooltipTrigger asChild><Button variant="outline" size="icon" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts"><Keyboard /></Button></TooltipTrigger><TooltipContent>Keyboard shortcuts</TooltipContent></Tooltip>
             <DropdownMenu>
               <DropdownMenuTrigger asChild><Button variant="outline">Board <ChevronDown /></Button></DropdownMenuTrigger>
               <DropdownMenuContent align="end"><DropdownMenuLabel>Board tools</DropdownMenuLabel>
                 <DropdownMenuItem asChild><a href="/api/board?export=1" download><Download /> Export JSON</a></DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setPaletteOpen(true)}><Search /> Command palette <DropdownMenuShortcut>⌘K</DropdownMenuShortcut></DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setShortcutsOpen(true)}><Keyboard /> Keyboard shortcuts <DropdownMenuShortcut>?</DropdownMenuShortcut></DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -384,7 +428,7 @@ export default function Home() {
                 setDropTarget(""); setDragging(null); if (data.taskId && data.personId) await runAction("unassign", { taskId: data.taskId, personId: data.personId }, "Assignment removed"); }}>
               {dragging?.personId && dropTarget === "task-pool" && <div className="pool-drop-message">Drop to remove this assignment</div>}
               {visibleTasks.map((task, taskIndex) => <TaskCard key={task.id} task={task} people={assignmentPeople(task.id)} selected={selectedTaskId === task.id}
-                muted={Boolean(selectedTaskId && selectedTaskId !== task.id)} onSelect={() => setSelectedTaskId((current) => current === task.id ? null : task.id)}
+                muted={Boolean(selectedTaskId && selectedTaskId !== task.id)} onSelect={() => selectTask(task)}
                 onEdit={() => setEditor({ kind: "task", id: task.id })} onArchive={(outcome) => void archiveTask(task, outcome)} onRestore={() => void restoreTask(task)}
                 onDelete={() => setDeleteState({ kind: "task", id: task.id, name: task.title })}
                 onDragStart={(event) => { if (search.trim()) { event.preventDefault(); return; } setDraggingTaskOrderId(task.id); setDragging({ taskId: task.id }); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("application/x-workgrid-task-order", task.id); event.dataTransfer.setData("application/json", JSON.stringify({ taskId: task.id })); }}
@@ -416,14 +460,14 @@ export default function Home() {
               <div className="selection-summary" style={{ "--task-color": selectedTask.color } as React.CSSProperties}><span className="selection-swatch" />
                 <div><span>Showing distribution for</span><strong>{selectedTask.title}</strong></div>
                 <div className="selection-facts"><span><b>{selectedPrimary?.name || "No owner"}</b> primary</span><span><b>{selectedContributors}</b> {selectedContributors === 1 ? "contributor" : "contributors"}</span></div>
-                <Button variant="ghost" size="icon-sm" onClick={() => setSelectedTaskId(null)} aria-label="Clear task selection"><X /></Button></div>
+                <Button variant="ghost" size="icon-sm" onClick={() => { setSelectedTaskId(null); setAnnouncement("Task selection cleared."); }} aria-label="Clear task selection"><X /></Button></div>
             ) : <div className="board-hint"><span>Drag a task into the grid, or select one and click a focus cell.</span><button type="button" onClick={() => setShortcutsOpen(true)}>View shortcuts</button></div>}
 
             <div className="grid-scroll"><div className="focus-grid">
-              <p className="sr-only" aria-live="polite" aria-atomic="true">{orderAnnouncement}</p>
+              <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
               <div className="grid-corner">Team member</div>
               {focusLevels.map((focus) => <div className={`grid-column-heading focus-${focus.id}`} key={focus.id}><span>{focus.label}</span><small>{focus.helper}</small></div>)}
-              {displayedPeople.map((person) => { const personIndex = people.findIndex((item) => item.id === person.id); return <div className={`grid-row load-${person.load.state} ${personDropTarget?.personId === person.id ? `person-drop-${personDropTarget.edge}` : ""}`} key={person.id}
+              {displayedPeople.map((person) => { const personIndex = people.findIndex((item) => item.id === person.id); return <div className={`grid-row load-${person.load.state} ${selectedPersonId === person.id ? "is-selected" : ""} ${personDropTarget?.personId === person.id ? `person-drop-${personDropTarget.edge}` : ""}`} key={person.id}
                 onDragOver={(event) => { if (!draggingPersonId || draggingPersonId === person.id) return; event.preventDefault(); event.dataTransfer.dropEffect = "move";
                   const bounds = event.currentTarget.getBoundingClientRect(); setPersonDropTarget({ personId: person.id, edge: event.clientY < bounds.top + bounds.height / 2 ? "before" : "after" }); }}
                 onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setPersonDropTarget(null); }}
@@ -441,11 +485,15 @@ export default function Home() {
                       else if (key === "ArrowDown" && personIndex < people.length - 1) void reorderPerson(person, { afterPersonId: people[personIndex + 1].id }); }}>
                     <GripVertical aria-hidden="true" />
                   </button>
-                  <div className="avatar" style={{ background: person.color }}>{initials(person.name)}</div>
-                  <div className="person-copy"><strong>{person.name}</strong><span>{person.role || "Team member"}</span>
-                    <span className={`load-indicator load-indicator--${person.load.state}`} title={`${person.load.counts.primary} primary, ${person.load.counts.secondary} secondary, ${person.load.counts.tertiary} tertiary`}>
-                      <i aria-hidden="true" />{person.load.state === "low" ? "Low load" : person.load.state === "overloaded" ? "Overloaded" : "Balanced"} · {person.load.score}
-                    </span></div>
+                  <button type="button" className={`person-select-button ${selectedPersonId === person.id ? "is-selected" : ""}`}
+                    aria-pressed={selectedPersonId === person.id} aria-label={`Select ${person.name} to assign the highlighted task`}
+                    onClick={() => selectPerson(person)}>
+                    <div className="avatar" style={{ background: person.color }}>{initials(person.name)}</div>
+                    <div className="person-copy"><strong>{person.name}</strong><span>{person.role || "Team member"}</span>
+                      <span className={`load-indicator load-indicator--${person.load.state}`} title={`${person.load.counts.primary} primary, ${person.load.counts.secondary} secondary, ${person.load.counts.tertiary} tertiary`}>
+                        <i aria-hidden="true" />{person.load.state === "low" ? "Low load" : person.load.state === "overloaded" ? "Overloaded" : "Balanced"} · {person.load.score}
+                      </span></div>
+                  </button>
                   <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon-xs" aria-label={`Actions for ${person.name}`}><MoreHorizontal /></Button></DropdownMenuTrigger>
                     <DropdownMenuContent align="end"><DropdownMenuItem disabled={personIndex === 0} onSelect={() => void reorderPerson(person, { beforePersonId: people[personIndex - 1].id })}><ArrowUp /> Move up</DropdownMenuItem>
                       <DropdownMenuItem disabled={personIndex === people.length - 1} onSelect={() => void reorderPerson(person, { afterPersonId: people[personIndex + 1].id })}><ArrowDown /> Move down</DropdownMenuItem>
@@ -467,7 +515,7 @@ export default function Home() {
                     <div className="cell-stack">{cellAssignments.map((assignment) => {
                       const task = taskById.get(assignment.taskId); if (!task || task.workflow.state === "archived") return null;
                       return <TaskCard key={assignment.id} task={task} assignment={assignment} people={assignmentPeople(task.id)} selected={selectedTaskId === task.id}
-                        muted={Boolean(selectedTaskId && selectedTaskId !== task.id)} onSelect={() => setSelectedTaskId((current) => current === task.id ? null : task.id)}
+                        muted={Boolean(selectedTaskId && selectedTaskId !== task.id)} onSelect={() => selectTask(task)}
                         onEdit={() => setEditor({ kind: "task", id: task.id })} onArchive={(outcome) => void archiveTask(task, outcome)} onRestore={() => void restoreTask(task)}
                         onDelete={() => setDeleteState({ kind: "task", id: task.id, name: task.title })} onDragStart={startDrag(task.id, person.id)} />;
                     })}</div>
@@ -482,7 +530,8 @@ export default function Home() {
         </section>
 
         {editor && <EditorDialog key={`${editor.kind}:${editor.id || "new"}`} editor={editor} tasks={tasks} people={people} onClose={() => setEditor(null)} onSubmit={runAction} />}
-        <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+        <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} context={commandContext} bindings={bindings} onRun={runCommand} />
+        <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} bindings={bindings} onResetBindings={resetBindings} onImportBindings={updateBindings} />
         <AlertDialog open={Boolean(deleteState)} onOpenChange={(open) => !open && setDeleteState(null)}><AlertDialogContent><AlertDialogHeader>
           <AlertDialogTitle>Delete {deleteState?.name}?</AlertDialogTitle><AlertDialogDescription>{deleteState?.kind === "person" ? "This removes the person and all of their assignments. Tasks remain available." : "This permanently removes the task and every assignment. Consider archiving it instead."}</AlertDialogDescription>
         </AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={async () => {

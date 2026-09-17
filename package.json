@@ -17,7 +17,7 @@
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "backup": "node scripts/backup-manager.mjs",
     "mcp": "tsx mcp/server.ts",
-    "test:contracts": "tsx --test tests/application-service.test.ts tests/mcp-contract.test.ts tests/backup-mcp-contract.test.ts tests/cli-backup-service.test.ts",
+    "test:contracts": "tsx --test tests/application-service.test.ts tests/mcp-contract.test.ts tests/backup-mcp-contract.test.ts tests/cli-backup-service.test.ts tests/commands.test.ts",
     "typecheck": "bash scripts/sites-env.sh -- tsc --noEmit"
   },
   "dependencies": {
