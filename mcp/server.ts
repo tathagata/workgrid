@@ -1,0 +1,66 @@
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import { BoardService } from "../lib/application/board-service.js";
+import { ApplicationError, commandSchema, parseCommand } from "../lib/domain/contracts.js";
+import { D1BoardRepository } from "../lib/persistence/d1-board-repository.js";
+import { openLocalDatabase } from "./sqlite-database.js";
+
+export function createMcpServer(service: BoardService) {
+  const server = new McpServer({ name: "workgrid", version: "1.0.0" });
+  server.registerResource("board", "workgrid://board", { title: "Workgrid board", mimeType: "application/json" }, async (uri) => jsonResource(uri.href, await service.getBoard()));
+  server.registerResource("appearance", "workgrid://appearance", { title: "Workgrid appearance capabilities", mimeType: "application/json" }, async (uri) => jsonResource(uri.href, service.getAppearance()));
+  server.registerResource("settings", "workgrid://settings", { title: "Workgrid board settings", mimeType: "application/json" }, async (uri) => jsonResource(uri.href, (await service.getBoard()).settings));
+  server.registerResource("person", new ResourceTemplate("workgrid://people/{id}", { list: undefined }), { title: "Workgrid person", mimeType: "application/json" }, async (uri, variables) => {
+    const item = (await service.getBoard()).people.find((person) => person.id === variables.id);
+    if (!item) throw new ApplicationError("NOT_FOUND", "Person not found.", "id");
+    return jsonResource(uri.href, item);
+  });
+  server.registerResource("task", new ResourceTemplate("workgrid://tasks/{id}", { list: undefined }), { title: "Workgrid task", mimeType: "application/json" }, async (uri, variables) => {
+    const item = (await service.getBoard()).tasks.find((task) => task.id === variables.id);
+    if (!item) throw new ApplicationError("NOT_FOUND", "Task not found.", "id");
+    return jsonResource(uri.href, item);
+  });
+
+  server.registerTool("board.get", { description: "Read the complete Workgrid board.", inputSchema: z.object({}).strict() }, async () => toolResult(await service.getBoard()));
+  server.registerTool("appearance.get", { description: "Read versioned palettes for web, MCP, and TUI clients.", inputSchema: z.object({}).strict() }, async () => toolResult(service.getAppearance()));
+  server.registerTool("settings.get", { description: "Read versioned focus-assessment settings and weights.", inputSchema: z.object({}).strict() }, async () => toolResult((await service.getBoard()).settings));
+  server.registerTool("people.list", { description: "List people in grid order.", inputSchema: z.object({}).strict() }, async () => toolResult((await service.getBoard()).people));
+  server.registerTool("people.loads", { description: "Read versioned person load metrics; filtering and sorting never change canonical grid order.", inputSchema: z.object({
+    state: z.enum(["low", "balanced", "overloaded"]).optional(), sort: z.enum(["canonical", "highest", "lowest"]).optional(),
+  }).strict() }, async (options) => toolResult(await service.getPeopleLoads(options)));
+  server.registerTool("tasks.list", { description: "List tasks in workflow order.", inputSchema: z.object({}).strict() }, async () => toolResult((await service.getBoard()).tasks));
+  for (const action of commandSchema.options.map((option) => option.shape.action.value)) {
+    server.registerTool(toolName(action), { description: `Execute the ${action} Workgrid command.`, inputSchema: z.object({ payload: z.record(z.unknown()) }).strict() }, async ({ payload }) => {
+      try { return toolResult(await service.execute(parseCommand({ action, payload }))); }
+      catch (error) { return toolError(error); }
+    });
+  }
+  server.registerTool("assignments.setFocus", { description: "Change an assignment's focus level.", inputSchema: z.object({ taskId: z.string(), personId: z.string(), focus: z.enum(["primary", "secondary", "tertiary"]) }).strict() }, async (payload) => {
+    try { return toolResult(await service.execute(parseCommand({ action: "assign", payload }))); } catch (error) { return toolError(error); }
+  });
+  server.registerTool("tasks.setWorkflowState", { description: "Archive or restore a task.", inputSchema: z.object({ id: z.string(), state: z.enum(["active", "archived"]), outcome: z.enum(["completed", "cancelled", "superseded"]).optional(), expectedRevision: z.number().int().positive().optional() }).strict() }, async ({ state, ...payload }) => {
+    try { return toolResult(await service.execute(parseCommand({ action: state === "archived" ? "archiveTask" : "restoreTask", payload: state === "active" ? { id: payload.id, expectedRevision: payload.expectedRevision } : payload }))); } catch (error) { return toolError(error); }
+  });
+  return server;
+}
+
+function toolName(action: string) {
+  return ({ addPerson: "people.create", updatePerson: "people.update", deletePerson: "people.delete", reorderPeople: "people.reorder", addTask: "tasks.create", updateTask: "tasks.update", reorderTasks: "tasks.reorder", deleteTask: "tasks.delete", archiveTask: "tasks.archive", restoreTask: "tasks.restore", assign: "assignments.assign", unassign: "assignments.unassign", updateFocusSettings: "settings.updateFocus" } as Record<string, string>)[action] ?? action;
+}
+function jsonResource(uri: string, value: unknown) { return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(value, null, 2) }] }; }
+function toolResult(value: unknown) { return { content: [{ type: "text" as const, text: JSON.stringify(value) }], structuredContent: value as Record<string, unknown> }; }
+function toolError(error: unknown) {
+  const safe = error instanceof ApplicationError ? error.toJSON() : { code: "INTERNAL", message: "The command could not be completed." };
+  return { isError: true, content: [{ type: "text" as const, text: JSON.stringify(safe) }] };
+}
+
+async function main() {
+  const database = openLocalDatabase();
+  const server = createMcpServer(new BoardService(new D1BoardRepository(database)));
+  const shutdown = async () => { await server.close(); database.close(); };
+  process.once("SIGINT", shutdown); process.once("SIGTERM", shutdown);
+  await server.connect(new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: 64 * 1024 }));
+}
+
+if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) main().catch((error) => { console.error(error instanceof Error ? error.message : "MCP startup failed."); process.exitCode = 1; });

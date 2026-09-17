@@ -7,8 +7,14 @@ services:
       - "127.0.0.1:4173:4173"
     environment:
       LOCAL_DATA_PATH: /data
+      WORKGRID_BACKUP_PATH: /backups
+      WORKGRID_BACKUP_INTERVAL_SECONDS: 86400
+      WORKGRID_BACKUP_RETAIN_DAILY: 7
+      WORKGRID_BACKUP_RETAIN_WEEKLY: 4
+      WORKGRID_BACKUP_MAX_BYTES: 1073741824
     volumes:
       - work-grid-data:/data
+      - work-grid-backups:/backups
     restart: unless-stopped
     healthcheck:
       test:
@@ -23,3 +29,4 @@ services:
 
 volumes:
   work-grid-data:
+  work-grid-backups:

@@ -5,12 +5,14 @@ import test from "node:test";
 const route = await readFile(new URL("../app/api/board/route.ts", import.meta.url), "utf8");
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const compose = await readFile(new URL("../docker-compose.yml", import.meta.url), "utf8");
+const contracts = await readFile(new URL("../lib/domain/contracts.ts", import.meta.url), "utf8");
 
 test("board writes enforce request and field limits", () => {
   assert.match(route, /MAX_BODY_BYTES = 16 \* 1024/);
-  assert.match(route, /z\.discriminatedUnion\("action"/);
-  assert.match(route, /description: optionalText\(2_000\)/);
-  assert.match(route, /status: 413/);
+  assert.match(route, /executeHttpBoardCommand\(service\(\), input\)/);
+  assert.match(contracts, /z\.discriminatedUnion\("action"/);
+  assert.match(contracts, /description: optionalText\(2_000\)/);
+  assert.match(route, /PAYLOAD_TOO_LARGE[\s\S]*413/);
 });
 
 test("internal errors are not returned to clients", () => {
