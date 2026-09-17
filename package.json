@@ -12,12 +12,12 @@
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "container:up": "docker compose up --build",
     "container:down": "docker compose down",
-    "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/*.test.mjs && tsx --test tests/*.test.ts",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "backup": "node scripts/backup-manager.mjs",
     "mcp": "tsx mcp/server.ts",
-    "test:contracts": "tsx --test tests/application-service.test.ts tests/mcp-contract.test.ts tests/commands.test.ts",
+    "test:contracts": "tsx --test tests/application-service.test.ts tests/mcp-contract.test.ts tests/backup-mcp-contract.test.ts tests/cli-backup-service.test.ts tests/commands.test.ts",
     "typecheck": "bash scripts/sites-env.sh -- tsc --noEmit"
   },
   "dependencies": {

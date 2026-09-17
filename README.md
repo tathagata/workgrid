@@ -75,7 +75,7 @@ Workgrid's web API and MCP server use the same typed application service and dom
 npm run mcp
 ```
 
-MCP exposes the board plus individual people/tasks as resources, and provides tools for every board mutation. See [the versioned application/MCP contract](docs/application-api.md) for schemas, error codes, client configuration, compatibility rules, and examples. The current local SQLite adapter should not run concurrently with the web development server.
+MCP exposes the board plus individual people/tasks as resources, and provides tools for every board mutation. It also exposes `backup.create/list/verify/restore/delete`, backed by the same `scripts/backup-manager.mjs` logic as the CLI above; backups it creates are written beneath `.wrangler/state/workgrid-backups`. See [the versioned application/MCP contract](docs/application-api.md) for schemas, error codes, client configuration, compatibility rules, and examples. The current local SQLite adapter should not run concurrently with the web development server.
 
 ## Assignment rules
 

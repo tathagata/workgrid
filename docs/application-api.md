@@ -18,7 +18,22 @@ Errors use `{ code, message, field?, details? }`. Codes are `INVALID_INPUT`, `NO
 - `tasks.create`, `tasks.update`, `tasks.delete`, and `tasks.setWorkflowState` mutate tasks.
 - `assignments.assign` creates or changes focus; `assignments.unassign` removes it. Assigning a primary replaces the existing primary atomically.
 - `tasks.reorder` accepts `{ taskId, state, beforeTaskId?, afterTaskId?, position?: "first" | "last", expectedRevision? }`. Exactly one same-list anchor or boundary is required; filtered clients must clear their filter before reordering. New tasks and workflow transitions append to their destination list.
-- Backup commands are a reserved extension point and must be added to the shared contract before any transport exposes them.
+- `settings.updateFocus` accepts `{ overfocusThreshold, expectedRevision? }` to tune focus assessment; see [Task focus assessment](#task-focus-assessment).
+- `backup.create/list/verify/restore/delete` manage local database backups; see [Backups](#backups).
+
+## Task lifecycle
+
+Every task has a `workflow: { state, outcome?, changedAt }`. `state` is `unfocused`, `focused`, or `archived`; legacy installations expose `status` until migration `0001_task_workflow.sql` runs, which maps every prior status deterministically without inventing an outcome. `tasks.setWorkflowState` (`archiveTask`/`restoreTask` internally) moves a task to `archived` with an optional terminal `outcome` of `completed`, `cancelled`, or `superseded`, or restores it back to an active list. Restoring always clears `outcome`. Archived tasks are immutable to assignment changes: `assignments.assign`/`unassign` reject an archived `taskId` with `FORBIDDEN_STATE` until the task is restored. `expectedRevision` on either command returns `CONFLICT` against a stale board revision. Archiving or restoring appends the task to the end of its destination workflow list; use `tasks.reorder` afterward to reposition it.
+
+## Task focus assessment
+
+Every non-archived task in `board.get` carries a derived `focusAssessment: { version, state, primaryCount, secondaryCount, tertiaryCount, weightedLoad, threshold }`; archived tasks report `focusAssessment: null`. `state` is `unfocused` (no primary owner), `focused`, or `overfocused` when `weightedLoad` exceeds the configured `threshold`. Weighted load sums assignments as primary `1`, secondary `0.5`, and tertiary `0.25` — the same weights `people.loads` uses for person load, published once in `board.settings.weights` so clients never duplicate them. `settings.updateFocus { overfocusThreshold, expectedRevision? }` changes the threshold within `[0.25, 100]`; `settings.get` (or `board.get().settings`) reads the current `focusAssessmentVersion`, `overfocusThreshold`, and `weights`. Changing threshold semantics requires a new `focusAssessmentVersion`.
+
+## Backups
+
+Backups are transport-neutral: `backup.create({ reason })`, `backup.list()`, `backup.verify({ backupId })`, `backup.restore({ backupId, confirmation, expectedCurrentRevision? })`, and `backup.delete({ backupId })` share one implementation (`scripts/backup-manager.mjs`, invoked identically by the CLI and by MCP) so recovery still works when the web app cannot start. Backups are identified only by an opaque ID matching `BACKUP_ID_PATTERN`; no transport accepts filesystem paths.
+
+A backup is not considered successful until its checksum and schema fingerprint are re-verified after the atomic write. Restore requires `confirmation` to equal exactly `RESTORE:<backupId>`, always takes a `pre-restore` safety backup first, and refuses to proceed if `expectedCurrentRevision` no longer matches the live database (`CONFLICT`). `delete` refuses to remove the last known-good backup (`FORBIDDEN_STATE`). Retention keeps a bounded number of daily/weekly generations plus the newest backup and never deletes the only remaining one. The container entrypoint takes a `pre-migration` backup and runs a post-migration integrity check before starting the app; a scheduled backup runs on a configurable interval. See the README for backup location, schedule, retention, and disaster-recovery procedures.
 
 ## Canonical people order
 
@@ -52,7 +67,7 @@ Calculation version 1 weights primary assignments as `1`, secondary as `0.5`, an
 
 ## MCP
 
-The MCP server is stdio-only and discovers the single D1 SQLite file beneath the project's fixed `.wrangler/state` directory. It accepts no database path, raw SQL, backup destination, or network configuration. Start the web app once to initialize the database, stop it to avoid concurrent SQLite processes, then run:
+The MCP server is stdio-only and discovers the single D1 SQLite file beneath the project's fixed `.wrangler/state` directory. It accepts no database path, raw SQL, backup destination, or network configuration; backups it creates are written beneath that same fixed directory (`.wrangler/state/workgrid-backups`), never to a client-supplied path. Start the web app once to initialize the database, stop it to avoid concurrent SQLite processes, then run:
 
 ```bash
 npm run mcp
@@ -73,6 +88,8 @@ Example client configuration:
 ```
 
 Resources are `workgrid://board`, `workgrid://people/{id}`, and `workgrid://tasks/{id}`. Every mutation is an MCP tool. Example arguments for `assignments.assign` are `{ "payload": { "taskId": "...", "personId": "...", "focus": "primary" } }`.
+
+`backup.create`, `backup.list`, `backup.verify`, `backup.restore`, and `backup.delete` are also MCP tools, backed by the same `scripts/backup-manager.mjs` logic the CLI and container entrypoint use. Example arguments for `backup.restore` are `{ "backupId": "...", "confirmation": "RESTORE:<backupId>" }`; the confirmation string must match exactly. A tool result whose value is a list wraps the array as `{ "items": [...] }` in `structuredContent` (the `content` text is always the raw JSON).
 
 ## Client commands
 
