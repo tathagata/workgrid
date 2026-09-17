@@ -37,12 +37,16 @@ export class SqliteDatabaseAdapter {
   close() { this.database.close(); }
 }
 
-export function openLocalDatabase(root = process.cwd()) {
+export function resolveLocalDatabasePath(root = process.cwd()) {
   const stateRoot = realpathSync(resolve(root, ".wrangler/state/v3/d1/miniflare-D1DatabaseObject"));
   const candidates = readdirSync(stateRoot, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".sqlite"))
     .map((entry) => realpathSync(resolve(entry.parentPath, entry.name)))
     .filter((path) => path.startsWith(`${stateRoot}${sep}`));
   if (candidates.length !== 1) throw new Error(`Expected exactly one local Workgrid database; found ${candidates.length}. Start the web app once before MCP.`);
-  return new SqliteDatabaseAdapter(new DatabaseSync(candidates[0]));
+  return candidates[0];
+}
+
+export function openLocalDatabase(root = process.cwd()) {
+  return new SqliteDatabaseAdapter(new DatabaseSync(resolveLocalDatabasePath(root)));
 }
