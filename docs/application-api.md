@@ -20,6 +20,7 @@ Errors use `{ code, message, field?, details? }`. Codes are `INVALID_INPUT`, `NO
 - `tasks.reorder` accepts `{ taskId, state, beforeTaskId?, afterTaskId?, position?: "first" | "last", expectedRevision? }`. Exactly one same-list anchor or boundary is required; filtered clients must clear their filter before reordering. New tasks and workflow transitions append to their destination list.
 - `settings.updateFocus` accepts `{ overfocusThreshold, expectedRevision? }` to tune focus assessment; see [Task focus assessment](#task-focus-assessment).
 - `backup.create/list/verify/restore/delete` manage local database backups; see [Backups](#backups).
+- `tasks.parseBulk` and `tasks.createBulk` turn a pasted list of tasks into created tasks; see [Bulk capture](#bulk-capture).
 
 ## Task lifecycle
 
@@ -64,6 +65,39 @@ The application service, not an individual UI, calculates person load. Every per
 Calculation version 1 weights primary assignments as `1`, secondary as `0.5`, and tertiary as `0.25`. Archived task assignments are retained for history but excluded. A score below `1` is `low`, from `1` through `2.5` inclusive is `balanced`, and above `2.5` is `overloaded`. Thresholds and weights may be configured when constructing the application service; changing their semantics requires a new calculation version.
 
 `people.loads { state?, sort? }` returns the policy and load projection. `state` is `low`, `balanced`, or `overloaded`; `sort` is `canonical`, `highest`, or `lowest`. These are read-only projections. They never write `sortOrder` or change the canonical order returned by `people.list`. Visual clients must pair color with a text/icon label and expose the numeric score and raw counts to assistive technology.
+
+## Bulk capture
+
+Bulk capture turns a pasted list of tasks into created tasks in one atomic operation, sharing one parser and one creation path across web, MCP, and future TUI clients. `syntaxVersion` is currently only `"1"`.
+
+### Syntax version 1
+
+One task per line; blank lines are ignored. Words are tokens, recognized wherever they appear on the line:
+
+```text
+- Investigate API latency #performance @primary:ada-lovelace !focused color:forest
+- Prepare release notes #release
+- Replace deprecated runner
+```
+
+- A leading `-`, `*`, or `•` is an optional bullet and is stripped.
+- `#category` sets the task's category (first one wins; extras produce a `MULTIPLE_CATEGORY_TAGS` warning).
+- `@primary:<id-or-name>` sets the primary owner. Prefer the person's stable ID; a case- and punctuation-insensitive full-name match (e.g. `ada-lovelace`, `AdaLovelace`, and `Ada Lovelace` are equivalent) is a documented convenience. No match is `PERSON_NOT_FOUND`; more than one match is `PERSON_AMBIGUOUS` — both are errors, since bulk capture never guesses.
+- `!focused` is optional and self-documenting: a task's workflow intent is `focused` whenever a primary owner resolves, `unfocused` otherwise. Writing `!focused` without a resolvable `@primary` is `FOCUSED_WITHOUT_PRIMARY` (error). `!archived` is always `ARCHIVED_NOT_SUPPORTED` (error) — bulk capture cannot create a task directly into the archived state. Any other `!word` is an `UNKNOWN_TAG` warning and is dropped from the title.
+- `color:<paletteId>` requests a specific task color; an unrecognized ID is `UNKNOWN_COLOR` (error, never silently substituted). Omit it to let the service auto-allocate the least-used color, exactly as `tasks.create` does — allocation is computed across the whole batch, so a large paste gets varied colors, not one repeated color.
+- `due:<anything>` is recognized syntax but not yet a supported field: it produces an `UNSUPPORTED_DUE_DATE` warning and is never persisted, so clients never believe something was saved that wasn't.
+- Everything left after removing tags is the title (its original word order is preserved). A line with no title text is `EMPTY_TITLE` (error).
+- A backslash immediately before a reserved marker (`\#`, `\@`, `\!`, `\color:`, `\due:`, or a leading `\-`/`\*`/`\•`) keeps it as literal title text.
+- Exact-duplicate lines (case- and whitespace-insensitive) are flagged with `DUPLICATE_LINE` on every repeat — never silently merged into one item — so the client can decide what to keep.
+- Parsing is pure, deterministic, and locale-independent: the same text and the same people always parse to the same result.
+
+### API
+
+`tasks.parseBulk { text, syntaxVersion? }` returns `{ syntaxVersion, items, summary }` without creating anything. Each item is `{ clientId, sourceLine, raw, title, category?, workflowIntent, primaryPersonId?, colorId?, warnings, errors }`; `warnings`/`errors` are `{ code, message }`. `summary` is `{ total, valid, withWarnings, withErrors }` (independent counts — an item can be both `valid` and have warnings). Limits: input text up to 256,000 characters, at most 500 recognized lines per submission (`PAYLOAD_TOO_LARGE` beyond either).
+
+`tasks.createBulk { syntaxVersion, items, mode: "atomic", expectedRevision?, idempotencyKey }` creates every item. `mode` only accepts `"atomic"` today: either every item and its primary assignment is created and the board revision advances once, or nothing is written. The service re-validates every item against the current board rather than trusting the client's preview — a person or color the client resolved a moment ago may no longer exist — and returns `NOT_FOUND`/`INVALID_INPUT` rather than guessing. `idempotencyKey` (8–128 characters) makes retries safe: calling again with the same key returns the original `{ created, assignments, revision }` without creating duplicates, even if the board's revision has since moved on from a successful first attempt. New tasks use the same canonical default insertion position as `tasks.create`/`tasks.reorder`.
+
+Both are ordinary application-service methods, not part of the `BoardCommand` mutation union (their return shape doesn't fit the single-changed-entity contract), and both are available as MCP tools (`tasks.parseBulk`, `tasks.createBulk`) and HTTP actions with the same names, sharing one schema, one parser, and one creation path.
 
 ## MCP
 

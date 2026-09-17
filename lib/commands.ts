@@ -3,7 +3,7 @@ import { z } from "zod";
 export type CommandId =
   | "palette.open" | "help.open" | "search.focus" | "selection.clear"
   | "task.create" | "task.edit" | "task.delete" | "task.archive" | "task.complete" | "task.restore"
-  | "task.moveUp" | "task.moveDown" | "task.moveFirst" | "task.moveLast"
+  | "task.moveUp" | "task.moveDown" | "task.moveFirst" | "task.moveLast" | "task.bulkCapture"
   | "person.create" | "person.edit" | "person.delete" | "person.moveUp" | "person.moveDown"
   | "assignment.primary" | "assignment.secondary" | "assignment.tertiary" | "assignment.remove"
   | "view.unfocused" | "view.focused" | "view.archived" | "history.undo";
@@ -32,6 +32,7 @@ export const COMMAND_REGISTRY: readonly CommandDefinition[] = [
   { id: "search.focus", label: "Search or jump to task/person", group: "Navigation", help: "Focus the board search. The palette also searches people.", defaultBindings: ["/"], available: yes },
   { id: "selection.clear", label: "Clear selection", group: "Navigation", help: "Clear the selected task and person.", defaultBindings: ["escape"], available: yes },
   { id: "task.create", label: "Create task", group: "Tasks", help: "Open the new task editor.", defaultBindings: ["n"], serviceAction: "addTask", available: yes },
+  { id: "task.bulkCapture", label: "Bulk capture tasks", group: "Tasks", help: "Paste a list of tasks, preview the parsed result, and create them all at once.", defaultBindings: ["b"], serviceAction: "createBulkTasks", available: yes },
   { id: "task.edit", label: "Edit selected task", group: "Tasks", help: "Open the selected task editor.", defaultBindings: ["e"], serviceAction: "updateTask", available: needsTask },
   { id: "task.archive", label: "Archive selected task", group: "Tasks", help: "Move selected task to archived.", defaultBindings: ["a"], serviceAction: "archiveTask", available: activeTask },
   { id: "task.complete", label: "Complete selected task", group: "Tasks", help: "Archive selected task as completed.", defaultBindings: ["c"], serviceAction: "archiveTask", available: activeTask },

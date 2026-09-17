@@ -7,6 +7,8 @@ import type { PersonLoadMetric, PersonLoadPolicy } from "@/lib/person-load";
 
 export const API_VERSION = 1 as const;
 export const MAX_PAGE_SIZE = 200;
+export const TASK_TITLE_MAX_LENGTH = 200;
+export const TASK_CATEGORY_MAX_LENGTH = 100;
 
 export const idSchema = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/, "Invalid identifier.");
 export const colorSchema = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, "Invalid color.");
@@ -93,7 +95,7 @@ export interface TaskDto {
 function taskInputSchema(includeId: boolean) {
   return z.object({
     ...(includeId ? { id: idSchema } : {}),
-    title: requiredText("A task title", 200), description: optionalText(2_000), category: optionalText(100),
+    title: requiredText("A task title", TASK_TITLE_MAX_LENGTH), description: optionalText(2_000), category: optionalText(TASK_CATEGORY_MAX_LENGTH),
     color: colorSchema.optional(), colorId: taskColorIdSchema.optional(),
   }).strict().superRefine((value, context) => {
     if (!value.color || !value.colorId) return;

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive, ArrowDown, ArrowUp, Check, ChevronDown, CirclePlay, Download, GripVertical,
-  Keyboard, MoreHorizontal, Pencil, Plus, Search, Trash2, UserPlus, Users, X,
+  Keyboard, ListPlus, MoreHorizontal, Pencil, Plus, Search, Trash2, UserPlus, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { TASK_PALETTE } from "@/lib/task-colors";
 import { PEOPLE_PALETTE } from "@/lib/people-colors";
 import { CommandPalette, ShortcutsDialog, useCommandBindings, useCommandDispatch } from "@/app/command-palette";
+import { BulkCaptureDialog } from "@/app/bulk-capture-dialog";
 import type { CommandContext, CommandDefinition } from "@/lib/commands";
 
 type Focus = "primary" | "secondary" | "tertiary";
@@ -237,6 +238,7 @@ export default function Home() {
   const [deleteState, setDeleteState] = useState<DeleteState>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [bulkCaptureOpen, setBulkCaptureOpen] = useState(false);
   const { bindings, updateBindings, resetBindings } = useCommandBindings();
   const [dragging, setDragging] = useState<{ taskId: string; personId?: string } | null>(null);
   const [dropTarget, setDropTarget] = useState("");
@@ -354,6 +356,7 @@ export default function Home() {
       case "search.focus": searchRef.current?.focus(); break;
       case "selection.clear": setSelectedTaskId(null); setSelectedPersonId(null); setAnnouncement("Selection cleared."); break;
       case "task.create": setEditor({ kind: "task" }); break;
+      case "task.bulkCapture": setBulkCaptureOpen(true); break;
       case "task.edit": if (selectedTask) setEditor({ kind: "task", id: selectedTask.id }); break;
       case "task.archive": if (selectedTask) void archiveTask(selectedTask); break;
       case "task.complete": if (selectedTask) void archiveTask(selectedTask, "completed"); break;
@@ -413,7 +416,10 @@ export default function Home() {
         <section className="workspace">
           <aside className="task-rail">
             <div className="rail-heading"><div><span className="eyebrow">Work inventory</span><h2>Tasks</h2></div>
-              <Tooltip><TooltipTrigger asChild><Button size="icon-sm" onClick={() => setEditor({ kind: "task" })} aria-label="Add task"><Plus /></Button></TooltipTrigger><TooltipContent>Add task · N</TooltipContent></Tooltip>
+              <div className="rail-heading-actions">
+                <Tooltip><TooltipTrigger asChild><Button variant="outline" size="sm" onClick={() => setBulkCaptureOpen(true)}><ListPlus /> Bulk capture</Button></TooltipTrigger><TooltipContent>Bulk capture · B</TooltipContent></Tooltip>
+                <Tooltip><TooltipTrigger asChild><Button size="icon-sm" onClick={() => setEditor({ kind: "task" })} aria-label="Add task"><Plus /></Button></TooltipTrigger><TooltipContent>Add task · N</TooltipContent></Tooltip>
+              </div>
             </div>
             <div className="search-box"><Search /><Input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tasks" aria-label="Search tasks" />
               {search && <button type="button" onClick={() => setSearch("")} aria-label="Clear search"><X /></button>}<kbd>/</kbd></div>
@@ -530,6 +536,8 @@ export default function Home() {
         </section>
 
         {editor && <EditorDialog key={`${editor.kind}:${editor.id || "new"}`} editor={editor} tasks={tasks} people={people} onClose={() => setEditor(null)} onSubmit={runAction} />}
+        {bulkCaptureOpen && <BulkCaptureDialog people={people} revision={board.revision} onClose={() => setBulkCaptureOpen(false)}
+          onCreated={(count) => { requestState().then(setBoard).catch(() => {}); setAnnouncement(`Created ${count} ${count === 1 ? "task" : "tasks"} from bulk capture.`); }} />}
         <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} context={commandContext} bindings={bindings} onRun={runCommand} />
         <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} bindings={bindings} onResetBindings={resetBindings} onImportBindings={updateBindings} />
         <AlertDialog open={Boolean(deleteState)} onOpenChange={(open) => !open && setDeleteState(null)}><AlertDialogContent><AlertDialogHeader>

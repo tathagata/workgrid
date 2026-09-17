@@ -175,6 +175,46 @@ export class D1BoardRepository implements BoardRepository {
     } else await upsert.run();
   }
 
+  async createBulkTasks(input: {
+    items: Array<{ clientId: string; title: string; category: string; primaryPersonId?: string; color: string; colorId: string | null }>;
+    idempotencyKey: string;
+    expectedRevision: string;
+  }) {
+    const existing = await this.db.prepare("SELECT task_ids AS taskIds, revision FROM idempotency_keys WHERE key = ?").bind(input.idempotencyKey).first<{ taskIds: string; revision: number }>();
+    if (existing) return { taskIds: JSON.parse(existing.taskIds) as string[], revision: `board:${existing.revision}` };
+
+    const expectedNumber = Number(input.expectedRevision.slice("board:".length));
+    let unfocusedOrder = await this.nextTaskOrder("unfocused");
+    let focusedOrder = await this.nextTaskOrder("focused");
+    const taskIds: string[] = [];
+    const statements: Statement[] = [];
+    // Every statement is gated on the same revision snapshot (rather than wrapped in an explicit ROLLBACK) so a
+    // stale request becomes an all-statements-no-op batch, matching how reorderTasks/reorderPeople stay atomic.
+    for (const item of input.items) {
+      const id = crypto.randomUUID();
+      taskIds.push(id);
+      const sortOrder = item.primaryPersonId ? focusedOrder++ : unfocusedOrder++;
+      statements.push(this.db.prepare(
+        "INSERT INTO tasks (id, title, description, category, color, color_id, sort_order) SELECT ?, ?, '', ?, ?, ?, ? WHERE (SELECT revision FROM board_metadata WHERE id = 1) = ?",
+      ).bind(id, item.title, item.category, item.color, item.colorId, sortOrder, expectedNumber));
+      if (item.primaryPersonId) {
+        statements.push(this.db.prepare(
+          "INSERT INTO assignments (id, task_id, person_id, focus) SELECT ?, ?, ?, 'primary' WHERE (SELECT revision FROM board_metadata WHERE id = 1) = ?",
+        ).bind(crypto.randomUUID(), id, item.primaryPersonId, expectedNumber));
+      }
+    }
+    statements.push(this.db.prepare(
+      "INSERT INTO idempotency_keys (key, task_ids, revision) SELECT ?, ?, ? WHERE (SELECT revision FROM board_metadata WHERE id = 1) = ?",
+    ).bind(input.idempotencyKey, JSON.stringify(taskIds), expectedNumber + 1, expectedNumber));
+    statements.push(this.db.prepare("UPDATE board_metadata SET revision = revision + 1 WHERE id = 1 AND revision = ?").bind(expectedNumber));
+
+    const results = await this.db.batch(statements);
+    const revisionUpdate = results[results.length - 1];
+    const changed = Number(revisionUpdate?.meta?.changes ?? revisionUpdate?.changes ?? 0);
+    if (!changed) throw new ApplicationError("CONFLICT", "The board changed during the operation.", "expectedRevision");
+    return { taskIds, revision: `board:${expectedNumber + 1}` };
+  }
+
   private async transition(id: string, lifecycle: TaskLifecycle, outcome: TerminalOutcome | null, expectedRevision?: number) {
     const task = await this.db.prepare("SELECT revision FROM tasks WHERE id = ?").bind(id).first<{ revision: number }>();
     if (!task) throw new ApplicationError("NOT_FOUND", "Task not found.", "id");
