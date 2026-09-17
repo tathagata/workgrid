@@ -5,6 +5,8 @@ import { D1BoardRepository } from "@/lib/persistence/d1-board-repository";
 import { executeHttpBoardCommand } from "@/lib/transports/http-board-adapter";
 
 const MAX_BODY_BYTES = 16 * 1024;
+/** Bulk capture text/items legitimately exceed the ordinary per-command limit; still bounded well under BULK_MAX_TEXT_LENGTH plus JSON overhead. */
+const MAX_BULK_BODY_BYTES = 512 * 1024;
 
 function service() {
   if (!env.DB) throw new Error("Private storage is unavailable.");
@@ -32,11 +34,17 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const declaredLength = Number(request.headers.get("content-length") ?? 0);
-    if (declaredLength > MAX_BODY_BYTES) return problem(new ApplicationError("PAYLOAD_TOO_LARGE", "Request body is too large."), 413);
+    if (declaredLength > MAX_BULK_BODY_BYTES) return problem(new ApplicationError("PAYLOAD_TOO_LARGE", "Request body is too large."), 413);
     const rawBody = await request.text();
-    if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) return problem(new ApplicationError("PAYLOAD_TOO_LARGE", "Request body is too large."), 413);
+    const byteLength = new TextEncoder().encode(rawBody).byteLength;
+    if (byteLength > MAX_BULK_BODY_BYTES) return problem(new ApplicationError("PAYLOAD_TOO_LARGE", "Request body is too large."), 413);
     let input: unknown;
     try { input = JSON.parse(rawBody); } catch { throw new ApplicationError("INVALID_INPUT", "Request body must be valid JSON."); }
+    const { action, payload } = (input && typeof input === "object" ? input : {}) as { action?: unknown; payload?: unknown };
+    const isBulkAction = action === "tasks.parseBulk" || action === "tasks.createBulk";
+    if (!isBulkAction && byteLength > MAX_BODY_BYTES) return problem(new ApplicationError("PAYLOAD_TOO_LARGE", "Request body is too large."), 413);
+    if (action === "tasks.parseBulk") return Response.json(await service().parseBulkTasks(payload));
+    if (action === "tasks.createBulk") return Response.json(await service().createBulkTasks(payload));
     return Response.json(await executeHttpBoardCommand(service(), input));
   } catch (error) {
     if (error instanceof ApplicationError) return problem(error, error.code === "CONFLICT" ? 409 : error.code === "NOT_FOUND" ? 404 : 400);

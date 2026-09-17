@@ -35,6 +35,12 @@ export function createMcpServer(service: BoardService, backups?: BackupService) 
     state: z.enum(["low", "balanced", "overloaded"]).optional(), sort: z.enum(["canonical", "highest", "lowest"]).optional(),
   }).strict() }, async (options) => toolResult(await service.getPeopleLoads(options)));
   server.registerTool("tasks.list", { description: "List tasks in workflow order.", inputSchema: z.object({}).strict() }, async () => toolResult((await service.getBoard()).tasks));
+  server.registerTool("tasks.parseBulk", { description: "Parse bulk-capture text into preview items (title, category, workflow intent, primary owner, color, warnings, errors) without creating anything.", inputSchema: z.object({ payload: z.record(z.unknown()) }).strict() }, async ({ payload }) => {
+    try { return toolResult(await service.parseBulkTasks(payload)); } catch (error) { return toolError(error); }
+  });
+  server.registerTool("tasks.createBulk", { description: "Atomically create every approved bulk-capture item and its primary assignment. Idempotent: retrying the same idempotencyKey returns the original result.", inputSchema: z.object({ payload: z.record(z.unknown()) }).strict() }, async ({ payload }) => {
+    try { return toolResult(await service.createBulkTasks(payload)); } catch (error) { return toolError(error); }
+  });
   for (const action of commandSchema.options.map((option) => option.shape.action.value)) {
     server.registerTool(toolName(action), { description: `Execute the ${action} Workgrid command.`, inputSchema: z.object({ payload: z.record(z.unknown()) }).strict() }, async ({ payload }) => {
       try { return toolResult(await service.execute(parseCommand({ action, payload }))); }

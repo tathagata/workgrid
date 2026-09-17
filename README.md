@@ -137,6 +137,7 @@ A verified database backup is required before applying this migration. To roll b
 | `/` | Search or jump to a task |
 | `Esc` | Clear selection |
 | `N` / `E` / `A` / `C` / `R` / `Shift+⌫` | Create / edit / archive / complete / restore / delete selected task |
+| `B` | Open bulk capture |
 | `⌥↑` / `⌥↓` / `⌥Home` / `⌥End` | Move selected task within its workflow list |
 | `Shift+N` / `Shift+E` / `⌘Shift+⌫` | Add / edit / remove person |
 | `⌘⌥↑` / `⌘⌥↓` | Move selected person |
@@ -144,6 +145,10 @@ A verified database backup is required before applying this migration. To roll b
 | `G` then `U` / `F` / `A` | Switch to Unfocused / Focused / Archived view |
 
 Command IDs, labels, groups, and their application-service action (`COMMAND_CAPABILITY_MANIFEST` in `lib/commands.ts`) are exported for future TUI parity, the same way `appearance.get` publishes palettes for non-web clients.
+
+## Bulk capture
+
+Paste a list of tasks — one per line, optional `#category`, `@primary:name-or-id`, `!focused`, and `color:paletteId` tags anywhere on the line — and create them all in one atomic operation. Open it with the **Bulk capture** button, the command palette, or `B`. The board behind the dialog is inert while it's open; a live summary and a per-line preview show exactly what will be created, and lines that need attention (an unresolvable person, an unknown color, a missing title) are excluded until fixed — nothing is created while any selected line still has an error. The draft is saved to this browser automatically, so an accidental close or refresh never loses it; use **Discard draft** to clear it explicitly. See [the syntax reference, limits, and error codes](docs/application-api.md#bulk-capture) for the full grammar and the shared `tasks.parseBulk`/`tasks.createBulk` contract used by web and MCP.
 
 ## Task colors
 

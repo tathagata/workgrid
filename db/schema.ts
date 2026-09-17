@@ -45,3 +45,11 @@ export const assignments = sqliteTable("assignments", {
   focus: text("focus", { enum: ["primary", "secondary", "tertiary"] }).notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [uniqueIndex("assignments_task_person_unique").on(table.taskId, table.personId)]);
+
+/** Lets a retried bulk-capture submission return its original result instead of duplicating tasks. */
+export const idempotencyKeys = sqliteTable("idempotency_keys", {
+  key: text("key").primaryKey(),
+  taskIds: text("task_ids").notNull(),
+  revision: integer("revision").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
