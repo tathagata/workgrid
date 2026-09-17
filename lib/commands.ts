@@ -27,7 +27,8 @@ const activeTask = (c: CommandContext) => !c.hasTask ? { enabled: false, reason:
 
 export const COMMAND_REGISTRY: readonly CommandDefinition[] = [
   { id: "palette.open", label: "Open command palette", group: "Navigation", help: "Search and run any command.", defaultBindings: ["mod+k"], available: yes },
-  { id: "help.open", label: "Open keyboard shortcut help", group: "Navigation", help: "Show shortcuts generated from this registry.", defaultBindings: ["shift+/"], available: yes },
+  // "?" is what KeyboardEvent.key reports for Shift+/ on a US layout; eventBinding is character-based, so the binding must match the character, not the physical chord.
+  { id: "help.open", label: "Open keyboard shortcut help", group: "Navigation", help: "Show shortcuts generated from this registry.", defaultBindings: ["shift+?"], available: yes },
   { id: "search.focus", label: "Search or jump to task/person", group: "Navigation", help: "Focus the board search. The palette also searches people.", defaultBindings: ["/"], available: yes },
   { id: "selection.clear", label: "Clear selection", group: "Navigation", help: "Clear the selected task and person.", defaultBindings: ["escape"], available: yes },
   { id: "task.create", label: "Create task", group: "Tasks", help: "Open the new task editor.", defaultBindings: ["n"], serviceAction: "addTask", available: yes },
@@ -93,3 +94,21 @@ export function filterCommands(query: string) {
   return COMMAND_REGISTRY.filter((command) => words.every((word) => `${command.label} ${command.help} ${command.id} ${command.group}`.toLowerCase().includes(word)));
 }
 export const COMMAND_CAPABILITY_MANIFEST = COMMAND_REGISTRY.map(({ id, label, help, group, serviceAction }) => ({ id, label, help, group, serviceAction: serviceAction ?? null }));
+
+/** Per-browser only. Never synced, never sent to the application service; key bindings are UI metadata, not API state. */
+export const BINDINGS_STORAGE_KEY = "workgrid.keyBindings.v1";
+
+export function loadBindings(): BindingMap {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(BINDINGS_STORAGE_KEY);
+    return raw ? parseBindingConfiguration(JSON.parse(raw)) : {};
+  } catch { return {}; }
+}
+
+export function saveBindings(bindings: BindingMap) {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.setItem(BINDINGS_STORAGE_KEY, JSON.stringify(bindings)); } catch { /* storage may be unavailable (private mode, quota) */ }
+}
+
+export function exportBindings(bindings: BindingMap) { return JSON.stringify(bindings, null, 2); }

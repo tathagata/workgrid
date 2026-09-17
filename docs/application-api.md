@@ -73,3 +73,7 @@ Example client configuration:
 ```
 
 Resources are `workgrid://board`, `workgrid://people/{id}`, and `workgrid://tasks/{id}`. Every mutation is an MCP tool. Example arguments for `assignments.assign` are `{ "payload": { "taskId": "...", "personId": "...", "focus": "primary" } }`.
+
+## Client commands
+
+`lib/commands.ts` defines every user-invokable command as a stable `{ id, label, group, help, defaultBindings, available(context), serviceAction? }` record; `COMMAND_CAPABILITY_MANIFEST` exports the ID, label, group, help text, and `serviceAction` (the `BoardCommand.action` it invokes, when it invokes one) for every command, so a TUI client can build an equivalent command surface without duplicating the web UI's key-handling code. Key bindings (`defaultBindings`, and any per-client override) are UI-only metadata — they are never sent to the application service and carry no API semantics. `available(context)` is a pure function of `{ hasTask, hasPerson, taskArchived, canMoveTaskUp, canMoveTaskDown, canMovePersonUp, canMovePersonDown, hasAssignment, searchActive }`, so any client can compute identical enable/disable state and the identical human-readable reason a command is unavailable.

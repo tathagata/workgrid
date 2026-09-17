@@ -117,16 +117,33 @@ Migration `0001_task_workflow.sql` preserves every task and assignment. Legacy `
 
 A verified database backup is required before applying this migration. To roll back, restore that backup (preferred), or reconstruct the old `status` from `legacy_status`; do not reverse by guessing from the derived workflow state.
 
-## Keyboard shortcuts
+## Keyboard-first command system
 
-- `N`: new task
-- `Shift + N`: add a person
-- `/`: search tasks
-- `A`: archive the selected task
-- `C`: complete the selected task
-- `R`: restore the selected archived task
-- `Esc`: clear the selected task
-- `?`: shortcut guide
+`lib/commands.ts` is the single source of truth for every command: its ID, label, default binding, availability rule, and help text. The board's shortcut handler, the command palette, and the generated shortcut-help dialog all read from this one registry, so they cannot drift from each other. Keyboard handling contains no persistence logic — every command invokes the same typed application-service actions (`assign`, `reorderTasks`, `archiveTask`, and so on) used by the web UI, MCP, and future TUI clients; key bindings are UI metadata, not API semantics.
+
+- **Command palette** (`⌘K` / `Ctrl+K`, or the "Commands" button) is a searchable list of every command, showing its current binding and, when a command is unavailable in the current context, why (e.g. "Select a task first.").
+- **Shortcut help** (`?`, or **Board → Keyboard shortcuts**) is generated from the same registry, grouped by area (Navigation, Tasks, People, Assignments, Views).
+- Two-key sequences (`G` then `U`/`F`/`A` to switch the task view) have a ~900 ms cancelable window; pressing an unrelated key cancels the sequence.
+- Shortcuts never fire while typing, composing text (IME), or focused in an assistive control (`input`, `textarea`, `select`, `contenteditable`, or `role="textbox"`/`"combobox"`); `Escape` blurs the field instead.
+- Select a task by clicking or pressing Enter/Space on its card, and select a person by clicking their row, to enable the context-sensitive Tasks/People/Assignments commands below.
+- Bindings are configurable per browser (never synced or sent to the application service): open the shortcut dialog's **Customize bindings** panel to export the current bindings as JSON, edit and re-import them, or reset to defaults. Import validates every command ID and rejects unknown IDs, conflicting bindings, and malformed configuration — including prototype-pollution payloads (`__proto__`, `constructor`, `prototype` keys are rejected outright).
+- macOS shows `⌘`/`⌥`; Windows and Linux show `Ctrl`/`Alt`. On some browsers, `Ctrl+1`–`Ctrl+3` and `Ctrl+0` (set primary/secondary/tertiary focus, remove assignment) may be intercepted for tab switching — the command palette is a reliable alternative that never conflicts with browser shortcuts.
+- `Undo last mutation` is listed and always disabled with an explanation: the application service does not yet expose a safe inverse operation for arbitrary mutations.
+
+| Default binding | Command |
+| --- | --- |
+| `⌘K` | Open command palette |
+| `?` | Open keyboard shortcut help |
+| `/` | Search or jump to a task |
+| `Esc` | Clear selection |
+| `N` / `E` / `A` / `C` / `R` / `Shift+⌫` | Create / edit / archive / complete / restore / delete selected task |
+| `⌥↑` / `⌥↓` / `⌥Home` / `⌥End` | Move selected task within its workflow list |
+| `Shift+N` / `Shift+E` / `⌘Shift+⌫` | Add / edit / remove person |
+| `⌘⌥↑` / `⌘⌥↓` | Move selected person |
+| `⌘1` / `⌘2` / `⌘3` / `⌘0` | Set primary / secondary / tertiary focus / remove assignment (needs a selected task and person) |
+| `G` then `U` / `F` / `A` | Switch to Unfocused / Focused / Archived view |
+
+Command IDs, labels, groups, and their application-service action (`COMMAND_CAPABILITY_MANIFEST` in `lib/commands.ts`) are exported for future TUI parity, the same way `appearance.get` publishes palettes for non-web clients.
 
 ## Task colors
 
