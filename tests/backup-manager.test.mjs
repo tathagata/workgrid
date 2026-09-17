@@ -103,6 +103,29 @@ test("write failures do not modify the source database", () => {
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test("auto-discovery ignores Miniflare's own metadata.sqlite registries and finds only the real database", () => {
+  const root = mkdtempSync(join(tmpdir(), "workgrid-backup-"));
+  try {
+    // Mirrors a real wrangler --persist-to layout: Miniflare keeps a "metadata.sqlite" registry per subsystem
+    // (D1, Cache, ...) alongside the actual hash-named database file(s).
+    const d1Dir = join(root, "v3", "d1", "miniflare-D1DatabaseObject");
+    const cacheDir = join(root, "v3", "cache", "miniflare-CacheObject");
+    mkdirSync(d1Dir, { recursive: true });
+    mkdirSync(cacheDir, { recursive: true });
+    new DatabaseSync(join(d1Dir, "metadata.sqlite")).close();
+    new DatabaseSync(join(cacheDir, "metadata.sqlite")).close();
+    const database = join(d1Dir, "abcdef0123456789.sqlite");
+    const db = new DatabaseSync(database);
+    db.exec("PRAGMA user_version=3; CREATE TABLE people(id TEXT PRIMARY KEY, name TEXT); CREATE TABLE tasks(id TEXT PRIMARY KEY, title TEXT, status TEXT, color TEXT, sort_order INTEGER); CREATE TABLE assignments(id TEXT, task_id TEXT, person_id TEXT); CREATE TABLE settings(key TEXT, value TEXT);");
+    db.close();
+
+    // No WORKGRID_DB_PATH: this exercises the same auto-discovery path the Docker entrypoint relies on.
+    const result = spawnSync(process.execPath, [script, "create", "pre-migration", "--allow-missing"], { encoding: "utf8", env: { ...process.env, LOCAL_DATA_PATH: root } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /found 3|found 2/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("retention is deterministic and preserves the newest verified backup", () => {
   const f = fixture();
   try {

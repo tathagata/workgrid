@@ -39,8 +39,9 @@ export class SqliteDatabaseAdapter {
 
 export function resolveLocalDatabasePath(root = process.cwd()) {
   const stateRoot = realpathSync(resolve(root, ".wrangler/state/v3/d1/miniflare-D1DatabaseObject"));
+  // "metadata.sqlite" is Miniflare's own internal D1 object registry, never the actual stored database.
   const candidates = readdirSync(stateRoot, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".sqlite"))
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".sqlite") && entry.name !== "metadata.sqlite")
     .map((entry) => realpathSync(resolve(entry.parentPath, entry.name)))
     .filter((path) => path.startsWith(`${stateRoot}${sep}`));
   if (candidates.length !== 1) throw new Error(`Expected exactly one local Workgrid database; found ${candidates.length}. Start the web app once before MCP.`);

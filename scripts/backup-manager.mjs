@@ -43,7 +43,9 @@ function walkSqlite(path) {
     if (entry.isSymbolicLink() || entry.name === "backups" || entry.name === basename(BACKUP_DIR)) continue;
     const candidate = join(path, entry.name);
     if (entry.isDirectory()) results.push(...walkSqlite(candidate));
-    else if (entry.isFile() && entry.name.endsWith(".sqlite")) results.push(candidate);
+    // "metadata.sqlite" is Miniflare's own internal registry for every subsystem (D1, Cache, KV, R2, ...),
+    // never the actual stored database; skip it so the walk finds only the real per-database file.
+    else if (entry.isFile() && entry.name.endsWith(".sqlite") && entry.name !== "metadata.sqlite") results.push(candidate);
   }
   return results;
 }
