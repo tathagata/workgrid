@@ -28,12 +28,16 @@ function formatBindingSteps(binding: string): string[][] {
 
 function BindingKeys({ binding }: { binding: string }) {
   const steps = formatBindingSteps(binding);
+  // One chip per chord (e.g. "⌘⌥↑" or "Ctrl+Alt+Up"), not one chip per key — three bordered boxes for a
+  // single shortcut reads as three separate shortcuts and makes a list of ~25 of them look far busier than it is.
+  // A genuine multi-key sequence (press "g", then "u") still gets a separate chip per step, joined by "then".
+  const chordSeparator = isMac() ? "" : "+";
   return (
     <KbdGroup>
       {steps.map((step, stepIndex) => (
         <span key={stepIndex} className="binding-step">
           {stepIndex > 0 && <span className="binding-then" aria-hidden="true">then</span>}
-          {step.map((key, keyIndex) => <Kbd key={keyIndex}>{key}</Kbd>)}
+          <Kbd>{step.join(chordSeparator)}</Kbd>
         </span>
       ))}
     </KbdGroup>
