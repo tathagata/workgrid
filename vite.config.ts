@@ -10,6 +10,7 @@ const { d1, r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
+const additionalAllowedHost = process.env.WORKGRID_ALLOWED_HOST;
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -46,7 +47,12 @@ export default defineConfig(async () => {
   return {
     server: {
       host: "0.0.0.0",
-      allowedHosts: ["terminal.local", "localhost", "127.0.0.1"],
+      allowedHosts: [
+        "terminal.local",
+        "localhost",
+        "127.0.0.1",
+        ...(additionalAllowedHost ? [additionalAllowedHost] : []),
+      ],
       ...(isCodexSeatbeltSandbox
         ? { watch: { useFsEvents: false, usePolling: true } }
         : {}),

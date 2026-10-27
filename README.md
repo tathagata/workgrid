@@ -75,7 +75,15 @@ Workgrid's web API and MCP server use the same typed application service and dom
 npm run mcp
 ```
 
-MCP exposes the board plus individual people/tasks as resources, and provides tools for every board mutation. It also exposes `backup.create/list/verify/restore/delete`, backed by the same `scripts/backup-manager.mjs` logic as the CLI above; backups it creates are written beneath `.wrangler/state/workgrid-backups`. See [the versioned application/MCP contract](docs/application-api.md) for schemas, error codes, client configuration, compatibility rules, and examples. The current local SQLite adapter should not run concurrently with the web development server.
+MCP exposes the board plus individual people/tasks as resources, and provides tools for every board mutation. It also exposes `backup_create`, `backup_list`, `backup_verify`, `backup_restore`, and `backup_delete`, backed by the same `scripts/backup-manager.mjs` logic as the CLI above; backups it creates are written beneath `.wrangler/state/workgrid-backups`. MCP tool names use only letters, numbers, underscores, and hyphens so they can be passed through OpenAI-compatible clients. See [the versioned application/MCP contract](docs/application-api.md) for schemas, error codes, client configuration, compatibility rules, and examples. The current local SQLite adapter should not run concurrently with the web development server.
+
+### Streamable HTTP MCP and LibreChat
+
+The running web application also exposes the same board tools and resources at `POST /api/mcp` using MCP Streamable HTTP. This transport uses the application's own D1 binding, so it is safe to use while the board UI is running. Set `WORKGRID_MCP_API_KEY` to require `Authorization: Bearer ...` on the MCP endpoint. Backup and restore tools remain stdio-only because they operate on local database files rather than the D1 service binding.
+
+`board_get` is linked to a self-contained MCP App (`ui://workgrid/board`) that renders people, task workflow columns, assignment counts, and load states from the tool result. It has no remote scripts, styles, or network permissions and degrades to the normal JSON/text result in clients without MCP Apps support.
+
+For the standalone, copyable LibreChat + MCP Apps kit, OpenAI configuration, two-origin sandbox, and startup commands, see [deploy/librechat/README.md](deploy/librechat/README.md). This repository's thin adapter is documented separately in [deploy/librechat-workgrid/README.md](deploy/librechat-workgrid/README.md).
 
 ## Assignment rules
 
@@ -144,15 +152,15 @@ A verified database backup is required before applying this migration. To roll b
 | `⌘1` / `⌘2` / `⌘3` / `⌘0` | Set primary / secondary / tertiary focus / remove assignment (needs a selected task and person) |
 | `G` then `U` / `F` / `A` | Switch to Unfocused / Focused / Archived view |
 
-Command IDs, labels, groups, and their application-service action (`COMMAND_CAPABILITY_MANIFEST` in `lib/commands.ts`) are exported for future TUI parity, the same way `appearance.get` publishes palettes for non-web clients.
+Command IDs, labels, groups, and their application-service action (`COMMAND_CAPABILITY_MANIFEST` in `lib/commands.ts`) are exported for future TUI parity, the same way the MCP `appearance_get` tool publishes palettes for non-web clients.
 
 ## Bulk capture
 
-Paste a list of tasks — one per line, optional `#category`, `@primary:name-or-id`, `!focused`, and `color:paletteId` tags anywhere on the line — and create them all in one atomic operation. Open it with the **Bulk capture** button, the command palette, or `B`. The board behind the dialog is inert while it's open; a live summary and a per-line preview show exactly what will be created, and lines that need attention (an unresolvable person, an unknown color, a missing title) are excluded until fixed — nothing is created while any selected line still has an error. The draft is saved to this browser automatically, so an accidental close or refresh never loses it; use **Discard draft** to clear it explicitly. See [the syntax reference, limits, and error codes](docs/application-api.md#bulk-capture) for the full grammar and the shared `tasks.parseBulk`/`tasks.createBulk` contract used by web and MCP.
+Paste a list of tasks — one per line, optional `#category`, `@primary:name-or-id`, `!focused`, and `color:paletteId` tags anywhere on the line — and create them all in one atomic operation. Open it with the **Bulk capture** button, the command palette, or `B`. The board behind the dialog is inert while it's open; a live summary and a per-line preview show exactly what will be created, and lines that need attention (an unresolvable person, an unknown color, a missing title) are excluded until fixed — nothing is created while any selected line still has an error. The draft is saved to this browser automatically, so an accidental close or refresh never loses it; use **Discard draft** to clear it explicitly. See [the syntax reference, limits, and error codes](docs/application-api.md#bulk-capture) for the full grammar and the shared bulk-capture contract, exposed as `tasks.parseBulk`/`tasks.createBulk` over HTTP and `tasks_parse_bulk`/`tasks_create_bulk` over MCP.
 
 ## Task colors
 
-Tasks use a versioned 12-color accessible palette. When no color is supplied, the application service chooses the least-used color among active tasks, resolving ties by the published palette order. Explicit palette IDs are stable across palette evolution; existing custom hex colors remain intact with a `null` palette ID. Web, MCP, and future TUI clients discover the palette through `appearance.get` rather than defining their own. Color is presentation metadata only and never controls task workflow.
+Tasks use a versioned 12-color accessible palette. When no color is supplied, the application service chooses the least-used color among active tasks, resolving ties by the published palette order. Explicit palette IDs are stable across palette evolution; existing custom hex colors remain intact with a `null` palette ID. Web and future TUI clients use the application query `appearance.get`; MCP clients use `appearance_get`. Color is presentation metadata only and never controls task workflow.
 
 ## Planned extensions
 

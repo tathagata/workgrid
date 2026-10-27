@@ -30,18 +30,18 @@ async function connect(repository: BoardRepository) {
   return { server, client };
 }
 
-test("MCP exposes tasks.parseBulk and tasks.createBulk sharing the same application-service logic as HTTP", async () => {
+test("MCP exposes tasks_parse_bulk and tasks_create_bulk sharing the same application-service logic as HTTP", async () => {
   const { server, client } = await connect(fixture());
   try {
     const tools = (await client.listTools()).tools.map((tool) => tool.name);
-    assert.ok(tools.includes("tasks.parseBulk"));
-    assert.ok(tools.includes("tasks.createBulk"));
+    assert.ok(tools.includes("tasks_parse_bulk"));
+    assert.ok(tools.includes("tasks_create_bulk"));
 
-    const parsed = await client.callTool({ name: "tasks.parseBulk", arguments: { payload: { text: "Ship it @primary:p1\nAnother task" } } });
+    const parsed = await client.callTool({ name: "tasks_parse_bulk", arguments: { payload: { text: "Ship it @primary:p1\nAnother task" } } });
     assert.equal(parsed.isError, undefined);
     assert.match(JSON.stringify(parsed.structuredContent), /"primaryPersonId":"p1"/);
 
-    const created = await client.callTool({ name: "tasks.createBulk", arguments: { payload: {
+    const created = await client.callTool({ name: "tasks_create_bulk", arguments: { payload: {
       syntaxVersion: "1", mode: "atomic", idempotencyKey: "mcp-contract-key-1",
       items: [{ clientId: "line-1", title: "Ship it", primaryPersonId: "p1" }],
     } } });
@@ -53,7 +53,7 @@ test("MCP exposes tasks.parseBulk and tasks.createBulk sharing the same applicat
 test("MCP returns a sanitized structured error for an invalid bulk create request", async () => {
   const { server, client } = await connect(fixture());
   try {
-    const result = await client.callTool({ name: "tasks.createBulk", arguments: { payload: { syntaxVersion: "1", mode: "atomic", idempotencyKey: "short", items: [] } } });
+    const result = await client.callTool({ name: "tasks_create_bulk", arguments: { payload: { syntaxVersion: "1", mode: "atomic", idempotencyKey: "short", items: [] } } });
     assert.equal(result.isError, true);
     assert.doesNotMatch(JSON.stringify(result), /stack|\/Users\//);
   } finally { await client.close(); await server.close(); }

@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+kit_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+env_file=${LIBRECHAT_ENV_FILE:-"$kit_dir/.env"}
+
+if [ ! -f "$env_file" ]; then
+  echo "Missing $env_file. Copy .env.example to .env and fill in its required values." >&2
+  exit 1
+fi
+
+export LIBRECHAT_KIT_DIR="$kit_dir"
+exec docker compose \
+  --project-directory "$kit_dir" \
+  --env-file "$env_file" \
+  -f "$kit_dir/docker-compose.yml" \
+  "$@"

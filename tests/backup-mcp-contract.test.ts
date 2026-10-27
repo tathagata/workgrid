@@ -33,18 +33,18 @@ test("MCP exposes backup tools that call through to the shared backup service", 
   const { server, client } = await connect(backups);
   try {
     const tools = (await client.listTools()).tools.map((tool) => tool.name);
-    for (const name of ["backup.create", "backup.list", "backup.verify", "backup.restore", "backup.delete"]) assert.ok(tools.includes(name), `${name} missing`);
+    for (const name of ["backup_create", "backup_list", "backup_verify", "backup_restore", "backup_delete"]) assert.ok(tools.includes(name), `${name} missing`);
 
-    const created = await client.callTool({ name: "backup.create", arguments: { reason: "manual" } });
+    const created = await client.callTool({ name: "backup_create", arguments: { reason: "manual" } });
     assert.equal(created.isError, undefined);
     assert.match(JSON.stringify(created.structuredContent), /deadbeef/);
 
-    const listed = await client.callTool({ name: "backup.list", arguments: {} });
+    const listed = await client.callTool({ name: "backup_list", arguments: {} });
     assert.match(JSON.stringify(listed.structuredContent), /"schemaVersion":3/);
 
-    await client.callTool({ name: "backup.verify", arguments: { backupId: "20260101T000000Z-manual-deadbeef" } });
-    await client.callTool({ name: "backup.restore", arguments: { backupId: "20260101T000000Z-manual-deadbeef", confirmation: "RESTORE:20260101T000000Z-manual-deadbeef" } });
-    await client.callTool({ name: "backup.delete", arguments: { backupId: "20260101T000000Z-manual-deadbeef" } });
+    await client.callTool({ name: "backup_verify", arguments: { backupId: "20260101T000000Z-manual-deadbeef" } });
+    await client.callTool({ name: "backup_restore", arguments: { backupId: "20260101T000000Z-manual-deadbeef", confirmation: "RESTORE:20260101T000000Z-manual-deadbeef" } });
+    await client.callTool({ name: "backup_delete", arguments: { backupId: "20260101T000000Z-manual-deadbeef" } });
     assert.deepEqual(backups.calls, ["create", "list", "verify", "restore", "delete"]);
   } finally { await client.close(); await server.close(); }
 });
@@ -53,7 +53,7 @@ test("MCP rejects a malformed backup ID before it reaches the service", async ()
   const backups = fakeBackups();
   const { server, client } = await connect(backups);
   try {
-    const result = await client.callTool({ name: "backup.verify", arguments: { backupId: "../../etc/passwd" } });
+    const result = await client.callTool({ name: "backup_verify", arguments: { backupId: "../../etc/passwd" } });
     assert.equal(result.isError, true);
     assert.deepEqual(backups.calls, []);
   } finally { await client.close(); await server.close(); }
@@ -63,6 +63,6 @@ test("backup tools are absent when no backup service is configured", async () =>
   const { server, client } = await connect();
   try {
     const tools = (await client.listTools()).tools.map((tool) => tool.name);
-    for (const name of ["backup.create", "backup.list", "backup.verify", "backup.restore", "backup.delete"]) assert.ok(!tools.includes(name), `${name} unexpectedly present`);
+    for (const name of ["backup_create", "backup_list", "backup_verify", "backup_restore", "backup_delete"]) assert.ok(!tools.includes(name), `${name} unexpectedly present`);
   } finally { await client.close(); await server.close(); }
 });

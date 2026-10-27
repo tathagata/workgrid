@@ -52,6 +52,8 @@ logs/
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+!deploy/librechat/.env.example
+!deploy/librechat-workgrid/.env.example
 
 # editors
 .idea/

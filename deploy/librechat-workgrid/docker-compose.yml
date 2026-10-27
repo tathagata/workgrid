@@ -1,0 +1,7 @@
+# Work Grid integration only. The reusable stack in ../librechat does not
+# assume that its MCP server is another service in the same Compose project.
+services:
+  librechat:
+    depends_on:
+      work-grid:
+        condition: service_healthy

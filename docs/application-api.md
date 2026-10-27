@@ -48,7 +48,7 @@ Mutation results contain the updated board, its revision, and a `changed` entity
 
 ## Task colors
 
-`appearance.get` returns `taskPalette` and `paletteVersion`. HTTP clients use `GET /api/board?appearance=1`; MCP clients may call the `appearance.get` tool or read `workgrid://appearance`. Clients should render the returned `value` and `foreground` instead of maintaining their own palette.
+`appearance.get` returns `taskPalette` and `paletteVersion`. HTTP clients use `GET /api/board?appearance=1`; MCP clients may call the `appearance_get` tool or read `workgrid://appearance`. Clients should render the returned `value` and `foreground` instead of maintaining their own palette.
 
 `tasks.create` accepts an optional `colorId`, an optional six-digit hex `color`, or both when they agree. If both are omitted, the service selects the least-used palette color among non-archived tasks; ties follow the published palette order. `tasks.update` preserves the existing color when both fields are omitted. Known colors are returned with stable `colorId`; preserved legacy/custom hex values are returned with `colorId: null`. Palette IDs, not hex values, are the stable identity. No workflow behavior depends on a color.
 
@@ -97,17 +97,21 @@ One task per line; blank lines are ignored. Words are tokens, recognized whereve
 
 `tasks.createBulk { syntaxVersion, items, mode: "atomic", expectedRevision?, idempotencyKey }` creates every item. `mode` only accepts `"atomic"` today: either every item and its primary assignment is created and the board revision advances once, or nothing is written. The service re-validates every item against the current board rather than trusting the client's preview — a person or color the client resolved a moment ago may no longer exist — and returns `NOT_FOUND`/`INVALID_INPUT` rather than guessing. `idempotencyKey` (8–128 characters) makes retries safe: calling again with the same key returns the original `{ created, assignments, revision }` without creating duplicates, even if the board's revision has since moved on from a successful first attempt. New tasks use the same canonical default insertion position as `tasks.create`/`tasks.reorder`.
 
-Both are ordinary application-service methods, not part of the `BoardCommand` mutation union (their return shape doesn't fit the single-changed-entity contract), and both are available as MCP tools (`tasks.parseBulk`, `tasks.createBulk`) and HTTP actions with the same names, sharing one schema, one parser, and one creation path.
+Both are ordinary application-service methods, not part of the `BoardCommand` mutation union (their return shape doesn't fit the single-changed-entity contract). HTTP exposes `tasks.parseBulk` and `tasks.createBulk`; MCP exposes the OpenAI-compatible names `tasks_parse_bulk` and `tasks_create_bulk`. Both transports share one schema, one parser, and one creation path.
 
 ## MCP
 
-The MCP server is stdio-only and discovers the single D1 SQLite file beneath the project's fixed `.wrangler/state` directory. It accepts no database path, raw SQL, backup destination, or network configuration; backups it creates are written beneath that same fixed directory (`.wrangler/state/workgrid-backups`), never to a client-supplied path. Start the web app once to initialize the database, stop it to avoid concurrent SQLite processes, then run:
+Work Grid exposes the same application service through two MCP transports:
 
-```bash
-npm run mcp
-```
+- The stdio server discovers the single D1 SQLite file beneath the project's fixed `.wrangler/state` directory. It accepts no database path, raw SQL, backup destination, or network configuration. Backup tools are available only on this transport and write beneath `.wrangler/state/workgrid-backups`, never to a client-supplied path. Start the web app once to initialize the database, stop it to avoid concurrent SQLite processes, then run:
 
-Example client configuration:
+  ```bash
+  npm run mcp
+  ```
+
+- The running web application exposes stateless Streamable HTTP at `/api/mcp`. It uses the application's D1 binding and can run alongside the board. Set `WORKGRID_MCP_API_KEY` to require a bearer token. This transport intentionally omits the filesystem-oriented backup tools.
+
+An example stdio client configuration is:
 
 ```json
 {
@@ -121,9 +125,9 @@ Example client configuration:
 }
 ```
 
-Resources are `workgrid://board`, `workgrid://people/{id}`, and `workgrid://tasks/{id}`. Every mutation is an MCP tool. Example arguments for `assignments.assign` are `{ "payload": { "taskId": "...", "personId": "...", "focus": "primary" } }`.
+Resources include `workgrid://board`, `workgrid://appearance`, `workgrid://settings`, `workgrid://people/{id}`, `workgrid://tasks/{id}`, and the `ui://workgrid/board` MCP App. Every mutation is an MCP tool. MCP tool names translate the application action's dot or camel-case boundary to underscores because OpenAI-compatible function names allow only letters, numbers, underscores, and hyphens. For example, application action `assignments.assign` is MCP tool `assignments_assign`; application query `board.get` is `board_get`. Example arguments for `assignments_assign` are `{ "payload": { "taskId": "...", "personId": "...", "focus": "primary" } }`.
 
-`backup.create`, `backup.list`, `backup.verify`, `backup.restore`, and `backup.delete` are also MCP tools, backed by the same `scripts/backup-manager.mjs` logic the CLI and container entrypoint use. Example arguments for `backup.restore` are `{ "backupId": "...", "confirmation": "RESTORE:<backupId>" }`; the confirmation string must match exactly. A tool result whose value is a list wraps the array as `{ "items": [...] }` in `structuredContent` (the `content` text is always the raw JSON).
+`backup_create`, `backup_list`, `backup_verify`, `backup_restore`, and `backup_delete` are also MCP tools, backed by the same `scripts/backup-manager.mjs` logic the CLI and container entrypoint use. Example arguments for `backup_restore` are `{ "backupId": "...", "confirmation": "RESTORE:<backupId>" }`; the confirmation string must match exactly. A tool result whose value is a list wraps the array as `{ "items": [...] }` in `structuredContent` (the `content` text is always the raw JSON).
 
 ## Client commands
 

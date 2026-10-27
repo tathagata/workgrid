@@ -1,0 +1,94 @@
+# Standalone LibreChat + MCP Apps stack. This file intentionally has no
+# dependency on Work Grid or on a particular MCP server implementation.
+services:
+  librechat:
+    # MCP Apps landed with config v1.3.18, first shipped in LibreChat v0.8.9-rc1.
+    image: ${LIBRECHAT_IMAGE:-ghcr.io/librechat-ai/librechat:v0.8.9-rc1}
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${LIBRECHAT_PORT:-3080}:3080"
+      # MCP Apps must be served from an origin different from the main LibreChat UI.
+      - "127.0.0.1:${LIBRECHAT_SANDBOX_PORT:-3081}:3080"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3080
+      MONGO_URI: mongodb://mongodb:27017/LibreChat
+      CONFIG_PATH: /app/data/librechat.yaml
+      LIBRECHAT_TEMP_CREDENTIALS_PATH: /app/data/.env.temp
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_REVERSE_PROXY: ${OPENAI_REVERSE_PROXY:-}
+      CREDS_KEY: ${LIBRECHAT_CREDS_KEY:-}
+      CREDS_IV: ${LIBRECHAT_CREDS_IV:-}
+      JWT_SECRET: ${LIBRECHAT_JWT_SECRET:-}
+      JWT_REFRESH_SECRET: ${LIBRECHAT_JWT_REFRESH_SECRET:-}
+      DOMAIN_CLIENT: http://localhost:${LIBRECHAT_PORT:-3080}
+      DOMAIN_SERVER: http://localhost:${LIBRECHAT_PORT:-3080}
+      MCP_SANDBOX_URL: http://localhost:${LIBRECHAT_SANDBOX_PORT:-3081}/api/mcp/sandbox
+      MCP_SANDBOX_FRAME_ANCESTORS: http://localhost:${LIBRECHAT_PORT:-3080}
+      MCP_SERVER_NAME: ${MCP_SERVER_NAME:-}
+      MCP_SERVER_URL: ${MCP_SERVER_URL:-}
+      MCP_SERVER_ADDRESS: ${MCP_SERVER_ADDRESS:-}
+      MCP_SERVER_API_KEY: ${MCP_SERVER_API_KEY:-}
+      MCP_SERVER_DESCRIPTION: ${MCP_SERVER_DESCRIPTION:-}
+      LIBRECHAT_WELCOME: ${LIBRECHAT_WELCOME:-}
+      # Backward-compatible inputs for existing Work Grid installations. New
+      # projects should use the generic MCP_SERVER_* variables above.
+      WORKGRID_MCP_URL: ${WORKGRID_MCP_URL:-}
+      WORKGRID_MCP_ADDRESS: ${WORKGRID_MCP_ADDRESS:-}
+      WORKGRID_MCP_API_KEY: ${WORKGRID_MCP_API_KEY:-}
+      ALLOW_EMAIL_LOGIN: "true"
+      ALLOW_REGISTRATION: ${LIBRECHAT_ALLOW_REGISTRATION:-true}
+      ALLOW_SOCIAL_LOGIN: "false"
+      ALLOW_UNVERIFIED_EMAIL_LOGIN: "true"
+      SESSION_COOKIE_SECURE: "false"
+      SEARCH: "false"
+      SCHEDULES_SINGLE_PROCESS: "true"
+      NO_PROXY: ${MCP_SERVER_NO_PROXY:-localhost,127.0.0.1,::1,mongodb,host.docker.internal}
+    extra_hosts:
+      # Makes a host-published MCP endpoint reachable on Linux. Docker Desktop
+      # already provides this name on macOS and Windows.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${LIBRECHAT_KIT_DIR:-.}/librechat.yaml:/app/librechat.template.yaml:ro
+      - ${LIBRECHAT_KIT_DIR:-.}/render-config.mjs:/app/render-librechat-config.mjs:ro
+      - librechat-data:/app/data
+      - librechat-images:/app/client/public/images
+      - librechat-uploads:/app/uploads
+      - librechat-logs:/app/logs
+    command:
+      - sh
+      - -c
+      - node /app/render-librechat-config.mjs && exec npm run backend
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3080').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+  mongodb:
+    image: mongo:8.0.20
+    command: mongod --noauth
+    restart: unless-stopped
+    volumes:
+      - librechat-mongodb:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  librechat-data:
+  librechat-images:
+  librechat-uploads:
+  librechat-logs:
+  librechat-mongodb:

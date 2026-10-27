@@ -1,0 +1,31 @@
+version: 1.3.18
+cache: true
+
+interface:
+  customWelcome: __LIBRECHAT_WELCOME__
+  defaultPinnedTools:
+    - mcp
+
+mcpSettings:
+  apps: true
+  # Exact private service exemption; public MCP destinations remain governed by
+  # LibreChat's default SSRF policy.
+  allowedAddresses:
+    - __MCP_SERVER_ADDRESS__
+
+# MCP Apps must use a dedicated browser origin. The Compose overlay publishes
+# the same LibreChat server on a second localhost port solely for this sandbox.
+mcpAppSandbox:
+  url: __MCP_SANDBOX_URL__
+  maxActiveViews: 3
+  maxPersistedAppBytes: 1048576
+
+mcpServers:
+  __MCP_SERVER_NAME__:
+    type: streamable-http
+    url: __MCP_SERVER_URL__
+    description: __MCP_SERVER_DESCRIPTION__
+    requiresOAuth: false
+    serverInstructions: true
+    timeout: 60000
+    headers: __MCP_SERVER_HEADERS__
