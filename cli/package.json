@@ -1,0 +1,43 @@
+{
+  "name": "work-distribution-grid-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Secure, JSON-first command line client and coding-agent skill for Workgrid",
+  "keywords": [
+    "workgrid",
+    "cli",
+    "agent-skill",
+    "codex",
+    "copilot"
+  ],
+  "type": "module",
+  "bin": {
+    "workgrid": "bin/workgrid.js"
+  },
+  "exports": {
+    ".": "./src/cli.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "skills/"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "pack:check": "node scripts/pack-check.mjs"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tathagata/workgrid.git",
+    "directory": "cli"
+  },
+  "bugs": {
+    "url": "https://github.com/tathagata/workgrid/issues"
+  },
+  "homepage": "https://github.com/tathagata/workgrid/tree/main/cli#readme"
+}

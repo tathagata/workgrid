@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Added the `workgrid` CLI (`work-distribution-grid-cli`), a zero-dependency client for the HTTP application service covering board, people, workload, tasks, assignments, settings, and atomic idempotent bulk capture.
+  - It renders tables on a terminal and JSON envelopes when piped or with `--json`.
+  - Help is available at every level, mistyped commands get suggestions, and `doctor` checks setup.
+  - It provides bash, zsh, and fish completions, and exit codes are stable.
+  - Security:
+    - Remote plaintext HTTP, redirects, and URL credentials are refused, and the token is accepted only from the environment.
+    - Terminal escape and bidi sequences in board content are neutralized.
+    - Responses and inputs are bounded, and destructive deletes require `--yes`.
+- Added the `workgrid` Agent Skill for OpenAI Codex, GitHub Copilot, and Claude Code.
+  - It ships inside the npm package and in `.agents/skills/workgrid/`.
+  - `workgrid skill install|status|uninstall` manages it. Installs are atomic and refuse symbolic links, and a skill file the CLI did not write is replaced only with `--force`.
+- Added CLI CI on Linux, macOS, and Windows with Node 22 and 24.
+- Added a tag-driven GitHub Release for the CLI. Nothing is published to the npm registry.
+  - Each release attaches an npm-installable `workgrid-cli.tgz`, a `SHA256SUMS` file, and a signed build-provenance attestation.
+  - Releases are built only from `main` and run in the `release` environment.
+  - Actions are pinned to commit SHAs, and Dependabot updates them after a 7-day cooldown.
+  - The tarball is checked against an exact file allowlist, must have zero dependencies, and stays `private` so `npm publish` refuses it.
 - Added the version 1 transport-neutral application-service contract used by the web API, MCP, and future clients.
 - Added a local stdio MCP server with board/person/task resources, mutation tools, bounded messages, sanitized errors, and one-command startup.
 - Web mutations now return a changed-entity reference and board revision in addition to the updated board.

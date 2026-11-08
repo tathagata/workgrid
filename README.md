@@ -77,6 +77,19 @@ npm run mcp
 
 MCP exposes the board plus individual people/tasks as resources, and provides tools for every board mutation. It also exposes `backup.create/list/verify/restore/delete`, backed by the same `scripts/backup-manager.mjs` logic as the CLI above; backups it creates are written beneath `.wrangler/state/workgrid-backups`. See [the versioned application/MCP contract](docs/application-api.md) for schemas, error codes, client configuration, compatibility rules, and examples. The current local SQLite adapter should not run concurrently with the web development server.
 
+## CLI and coding agents
+
+`workgrid` is a zero-dependency command-line client for the running app. It renders tables on a terminal and stable JSON for scripts and agents, and it uses the same API and validation as the web UI, so it is safe to use while the UI is open.
+
+```bash
+npm install --global https://github.com/tathagata/workgrid/releases/latest/download/workgrid-cli.tgz
+workgrid doctor
+workgrid board get
+workgrid skill install --agent all     # Codex + Copilot (~/.agents/skills), Copilot, Claude Code
+```
+
+The CLI is released on GitHub with a checksum and signed build provenance, not on the npm registry. Upgrade by rerunning the install command, then `workgrid skill install --agent all`. Inside this repository, Codex and Copilot discover the skill automatically from [`.agents/skills/workgrid/SKILL.md`](.agents/skills/workgrid/SKILL.md). To run the CLI from a checkout, use `npm run workgrid -- <command>`. See [`cli/README.md`](cli/README.md) for every command, the output and exit-code contract, the security model, and the release process.
+
 ## Assignment rules
 
 - A task can have only one primary owner.
@@ -171,6 +184,7 @@ npm run dev
 npm run lint
 npm run build
 npm run db:generate
+npm run cli:check
 ```
 
 Database schema changes live in `db/schema.ts`; generated migrations live in `drizzle/`.
