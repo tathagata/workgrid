@@ -308,3 +308,91 @@ test("SKILL.md frontmatter follows the Agent Skills spec", async () => {
     }
   }
 });
+
+// ── Regression tests for the PR #19 review ─────────────────────────────────────
+
+test("updates are pinned to the revision they read, so concurrent edits conflict instead of being overwritten", async (t) => {
+  for (const [args, action] of [[["tasks", "update", "t1", "--title", "New"], "updateTask"], [["people", "update", "p1", "--role", "Lead"], "updatePerson"]]) {
+    await t.test(action, async () => {
+      const posts = [];
+      const fetch = async (_url, init) => {
+        if (init.method === "GET") return response(BOARD);
+        posts.push(JSON.parse(init.body));
+        return response({ error: { code: "CONFLICT", message: "The board changed since it was read.", field: "expectedRevision", details: { currentRevision: "board:13" } } }, { status: 409 });
+      };
+      const result = await run(args, { fetch });
+      assert.equal(posts[0].action, action);
+      assert.equal(posts[0].payload.expectedRevision, "board:12");
+      assert.equal(result.code, 4);
+      assert.equal(JSON.parse(result.stderr).error.code, "CONFLICT");
+    });
+  }
+  await t.test("an explicit --expected-revision wins", async () => {
+    let post;
+    const fetch = async (_url, init) => {
+      if (init.method === "GET") return response(BOARD);
+      post = JSON.parse(init.body);
+      return response({ board: { revision: "board:9" }, changed: { kind: "task", id: "t1" } });
+    };
+    assert.equal((await run(["tasks", "update", "t1", "--title", "x", "--expected-revision", "board:8"], { fetch })).code, 0);
+    assert.equal(post.payload.expectedRevision, "board:8");
+  });
+});
+
+test("bash and zsh completion offer shell names after `workgrid completion`", async () => {
+  for (const shell of ["bash", "zsh"]) {
+    const { stdout } = await run(["completion", shell]);
+    assert.match(stdout, /completion\) words="bash zsh fish" ;;/);
+    assert.doesNotMatch(stdout, /completion\) words="" ;;/);
+    assert.doesNotMatch(stdout, /doctor\) words="" ;;/);
+  }
+  const zsh = (await run(["completion", "zsh"])).stdout;
+  assert.doesNotMatch(zsh, /fpath/, "the bashcompinit bridge cannot be autoloaded from $fpath");
+  assert.match(zsh, /eval "\$\(workgrid completion zsh\)"/);
+});
+
+test("idempotency keys use the API's character set and fail before any request", async () => {
+  for (const key of ["import:2026-11-12", "has space key", "dots.are.not.ok"]) {
+    const result = await run(["bulk", "create", "--idempotency-key", key]);
+    assert.equal(result.code, 2, key);
+    assert.match(JSON.parse(result.stderr).error.message, /letters, digits, _ or -/);
+  }
+});
+
+test("skill --force never replaces a directory at the SKILL.md path, and writes nothing", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workgrid-home-"));
+  try {
+    await mkdir(join(home, ".copilot", "skills", "workgrid", "SKILL.md"), { recursive: true });
+    const result = await run(["skill", "install", "--agent", "all", "--force"], { home, cwd: home });
+    assert.equal(result.code, 1);
+    assert.equal(JSON.parse(result.stderr).error.code, "UNSAFE_PATH");
+    await assert.rejects(lstat(join(home, ".agents", "skills", "workgrid", "SKILL.md")));
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("a filesystem failure part-way through restores targets already written", { skip: process.platform === "win32" || process.getuid?.() === 0 }, async () => {
+  const home = await mkdtemp(join(tmpdir(), "workgrid-home-"));
+  const { chmod } = await import("node:fs/promises");
+  const locked = join(home, ".copilot", "skills", "workgrid");
+  try {
+    // An outdated copy we own at the agents target, to prove it is restored rather than deleted.
+    const bundled = await readFile(new URL("../skills/workgrid/SKILL.md", import.meta.url), "utf8");
+    const agentsPath = join(home, ".agents", "skills", "workgrid", "SKILL.md");
+    const previous = bundled.replace("# Workgrid", "# Workgrid (old)");
+    await mkdir(join(home, ".agents", "skills", "workgrid"), { recursive: true });
+    await writeFile(agentsPath, previous);
+    await mkdir(locked, { recursive: true });
+    await chmod(locked, 0o555); // preflight passes (nothing to read), the write fails
+    const result = await run(["skill", "install", "--agent", "all"], { home, cwd: home });
+    assert.equal(result.code, 1, result.stderr);
+    const error = JSON.parse(result.stderr).error;
+    assert.equal(error.code, "SKILL_WRITE_FAILED");
+    assert.equal(error.details.rolledBack, true);
+    assert.equal(await readFile(agentsPath, "utf8"), previous);
+  } finally {
+    await chmod(locked, 0o755).catch(() => {});
+    await rm(home, { recursive: true, force: true });
+  }
+});

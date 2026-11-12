@@ -16,6 +16,7 @@ Errors use `{ code, message, field?, details? }`. Codes are `INVALID_INPUT`, `NO
 - `people.create`, `people.update`, and `people.delete` mutate people.
 - `people.reorder` accepts `{ personId, beforePersonId?, afterPersonId?, position?: "first" | "last", expectedRevision? }`. Exactly one anchor or position is required. IDs, rather than array indexes, make the command stable across web, MCP, and future TUI clients. A stale `expectedRevision` returns `CONFLICT`.
 - `tasks.create`, `tasks.update`, `tasks.delete`, and `tasks.setWorkflowState` mutate tasks.
+- `people.update` and `tasks.update` replace every editable field. They accept an optional `expectedRevision` (`board:N`). When it is present, the write and the revision bump are applied in one revision-gated batch, and a stale value returns `CONFLICT` with `details.currentRevision` instead of overwriting a concurrent edit. Read-modify-write clients, such as the CLI, should always send it.
 - `assignments.assign` creates or changes focus; `assignments.unassign` removes it. Assigning a primary replaces the existing primary atomically.
 - `tasks.reorder` accepts `{ taskId, state, beforeTaskId?, afterTaskId?, position?: "first" | "last", expectedRevision? }`. Exactly one same-list anchor or boundary is required; filtered clients must clear their filter before reordering. New tasks and workflow transitions append to their destination list.
 - `settings.updateFocus` accepts `{ overfocusThreshold, expectedRevision? }` to tune focus assessment; see [Task focus assessment](#task-focus-assessment).
@@ -137,5 +138,5 @@ The `work-distribution-grid-cli` package (`cli/`, released as a GitHub Release a
 - **Transport rules.** It rejects remote plaintext HTTP unless `--allow-http` is passed, refuses URL-embedded credentials and redirects, and bounds response bodies.
 - **Credentials.** Bearer credentials come only from `WORKGRID_TOKEN`.
 - **Results.** JSON-mode results use `{ ok: true, data }`, and failures use `{ ok: false, error }`. Exit codes are stable: 1 transport, 2 usage, 3 `NOT_FOUND`, 4 `CONFLICT`, 5 auth.
-- **Safety.** Deletes require `--yes`. Bulk creation always runs `tasks.parseBulk` first and requires a caller-provided idempotency key.
+- **Safety.** `tasks update` and `people update` send the board revision they read, so a concurrent edit returns `CONFLICT` instead of being overwritten. Deletes require `--yes`. Bulk creation always runs `tasks.parseBulk` first and requires a caller-provided idempotency key.
 - **Coding agents.** The package bundles the `workgrid` Agent Skill, which is mirrored at `.agents/skills/workgrid/SKILL.md`.

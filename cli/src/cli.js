@@ -349,7 +349,8 @@ function completionScript(shell) {
   }
 
   const cases = COMMANDS.filter((command) => command.path.length === 2).map((command) => `    "${command.path.join(" ")}") opts="${optionsFor(command)}" ;;`).join("\n");
-  const subs = groups.map((group) => `    ${group}) words="${subcommands[group].join(" ")}" ;;`).join("\n");
+  // Only groups with subcommands get a generated case; `completion` has its own case below and must not be shadowed.
+  const subs = groups.filter((group) => subcommands[group].length).map((group) => `    ${group}) words="${subcommands[group].join(" ")}" ;;`).join("\n");
   const bash = `_workgrid() {
   local cur="\${COMP_WORDS[COMP_CWORD]}" words="" opts=""
   if [[ $COMP_CWORD -eq 1 ]]; then
@@ -370,7 +371,8 @@ ${cases}
 complete -o default -F _workgrid workgrid
 `;
   if (shell === "bash") return `# workgrid completion for bash. Install: workgrid completion bash > ~/.local/share/bash-completion/completions/workgrid\n${bash}`;
-  return `# workgrid completion for zsh. Install: workgrid completion zsh > "\${fpath[1]}/_workgrid" (or eval "$(workgrid completion zsh)" in ~/.zshrc)\nautoload -U +X bashcompinit && bashcompinit\n${bash}`;
+  // Uses zsh's bash-completion bridge, so it must be sourced after compinit (not autoloaded from $fpath).
+  return `# workgrid completion for zsh. Install: add  eval "$(workgrid completion zsh)"  to ~/.zshrc after compinit\nautoload -U +X bashcompinit && bashcompinit\n${bash}`;
 }
 
 function fishQuote(text) {
@@ -415,7 +417,7 @@ async function doctor(global, env, dependencies) {
         const state = await inspectSkill(target, bundled);
         if (state === "absent" && !(scope === "user" && target.agent === "agents")) continue;
         const status = state === "current" ? "pass" : "warn";
-        const detail = { current: "current", outdated: "outdated — run `workgrid skill install`", foreign: "a different SKILL.md is installed here", absent: "not installed — run `workgrid skill install`" }[state];
+        const detail = { current: "current", outdated: "outdated — run `workgrid skill install`", foreign: "a different SKILL.md is installed here", unsafe: "the SKILL.md path is not a regular file", absent: "not installed — run `workgrid skill install`" }[state];
         add(`skill (${target.agent}, ${scope})`, status, `${detail} · ${target.path}`);
       }
     }

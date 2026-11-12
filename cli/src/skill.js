@@ -61,15 +61,46 @@ async function assertNoSymlinks(base, path) {
 export async function inspectSkill(target, bundled) {
   const stats = await lstatOrNull(target.path);
   if (!stats) return "absent";
-  if (stats.isSymbolicLink() || !stats.isFile()) return "foreign";
+  if (stats.isSymbolicLink() || !stats.isFile()) return "unsafe";
   const current = await readFile(target.path, "utf8");
   if (current === bundled) return "current";
   return OWNERSHIP_MARKER.test(current) ? "outdated" : "foreign";
 }
 
+function assertRegularFile(target, state) {
+  // --force replaces a foreign SKILL.md, never a directory, device, or link at that path.
+  if (state === "unsafe") throw new CliError("UNSAFE_PATH", `${target.path} is not a regular file; refusing to touch it.`, EXIT.FAILURE);
+}
+
+/** Captures what is at a target today (file contents, or null if absent) for rollback. */
+export async function snapshotSkill(target) {
+  const stats = await lstatOrNull(target.path);
+  return stats?.isFile() ? { content: await readFile(target.path, "utf8"), mode: stats.mode & 0o777 } : null;
+}
+
+/** Puts a target back exactly as `snapshotSkill` found it. */
+export async function restoreSkill(target, snapshot) {
+  await assertNoSymlinks(target.base, target.path);
+  if (!snapshot) {
+    await rm(target.path, { force: true });
+    await rmdir(target.dir).catch(() => {});
+    return;
+  }
+  await mkdir(target.dir, { recursive: true, mode: 0o755 });
+  const temp = join(target.dir, `.SKILL.md.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
+  try {
+    await writeFile(temp, snapshot.content, { mode: snapshot.mode, flag: "wx" });
+    await rename(temp, target.path);
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
 export async function installSkill(target, bundled, { force = false, dryRun = false } = {}) {
   await assertNoSymlinks(target.base, target.path);
   const state = await inspectSkill(target, bundled);
+  assertRegularFile(target, state);
   if (state === "current") return { ...summary(target), status: "unchanged" };
   if (state === "foreign" && !force) {
     throw new CliError("SKILL_CONFLICT", `${target.path} exists and was not installed by this CLI. Inspect it, then rerun with --force to replace it.`, EXIT.CONFLICT);
@@ -93,6 +124,7 @@ export async function installSkill(target, bundled, { force = false, dryRun = fa
 export async function uninstallSkill(target, bundled, { force = false, dryRun = false } = {}) {
   await assertNoSymlinks(target.base, target.path);
   const state = await inspectSkill(target, bundled);
+  assertRegularFile(target, state);
   if (state === "absent") return { ...summary(target), status: "absent" };
   if (state === "foreign" && !force) {
     throw new CliError("SKILL_CONFLICT", `${target.path} was not installed by this CLI; refusing to remove it without --force.`, EXIT.CONFLICT);

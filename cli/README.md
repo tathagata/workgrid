@@ -89,7 +89,7 @@ Exit codes are stable:
 | 1 | transport, server, or environment failure |
 | 2 | usage or validation error |
 | 3 | not found |
-| 4 | conflict (stale revision, or a skill file the CLI won't overwrite) |
+| 4 | conflict (the board changed since it was read, or a skill file the CLI won't overwrite) |
 | 5 | authentication failure |
 
 ### Bulk capture
@@ -106,7 +106,7 @@ workgrid bulk create --file tasks.txt --idempotency-key import-2026-11-08-a1 --e
 ### Shell completion
 
 ```sh
-workgrid completion zsh  > "${fpath[1]}/_workgrid"
+echo 'eval "$(workgrid completion zsh)"' >> ~/.zshrc   # after compinit
 workgrid completion bash > ~/.local/share/bash-completion/completions/workgrid
 workgrid completion fish > ~/.config/fish/completions/workgrid.fish
 ```

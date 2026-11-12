@@ -94,7 +94,8 @@ export interface TaskDto {
 
 function taskInputSchema(includeId: boolean) {
   return z.object({
-    ...(includeId ? { id: idSchema } : {}),
+    // Updates may carry the board revision they were based on, so a stale read-modify-write returns CONFLICT.
+    ...(includeId ? { id: idSchema, expectedRevision: boardRevisionSchema.optional() } : {}),
     title: requiredText("A task title", TASK_TITLE_MAX_LENGTH), description: optionalText(2_000), category: optionalText(TASK_CATEGORY_MAX_LENGTH),
     color: colorSchema.optional(), colorId: taskColorIdSchema.optional(),
   }).strict().superRefine((value, context) => {
@@ -149,7 +150,8 @@ export function parseCommand(value: unknown): BoardCommand {
 
 function personInputSchema(includeId: boolean) {
   return z.object({
-    ...(includeId ? { id: idSchema } : {}),
+    // Updates may carry the board revision they were based on, so a stale read-modify-write returns CONFLICT.
+    ...(includeId ? { id: idSchema, expectedRevision: boardRevisionSchema.optional() } : {}),
     name: requiredText("A name", 100), role: optionalText(160),
     color: colorSchema.optional(), colorId: peopleColorIdSchema.optional(),
   }).strict().superRefine((value, context) => {

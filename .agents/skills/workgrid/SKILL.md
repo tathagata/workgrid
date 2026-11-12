@@ -54,7 +54,7 @@ workgrid settings get --json
 
 ```sh
 workgrid tasks create --title "Ship CLI" --category Platform --json
-workgrid tasks update TASK_ID --title "New title" --json          # unspecified fields are kept
+workgrid tasks update TASK_ID --title "New title" --json          # unspecified fields are kept; CONFLICT if the board changed meanwhile
 workgrid assignments set TASK_ID PERSON_ID --focus primary --json # replaces any existing primary
 workgrid assignments remove TASK_ID PERSON_ID --json
 workgrid tasks archive TASK_ID --outcome completed --json         # completed|cancelled|superseded
@@ -83,7 +83,7 @@ Use bulk capture to turn a list of lines into tasks atomically. One task goes on
    ```
    Or put the lines in a file and pass `--file tasks.txt`.
 2. If any item has `errors`, show them to the user and stop. Show `warnings` too, but they do not block creation.
-3. Create, with an idempotency key that is unique to this batch (8–128 characters, no spaces):
+3. Create, with an idempotency key that is unique to this batch (8–128 letters, digits, `_` or `-`):
    ```sh
    workgrid bulk create --file tasks.txt --idempotency-key import-2026-11-08-a1 --expected-revision board:N --json
    ```

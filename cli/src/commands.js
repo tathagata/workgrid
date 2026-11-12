@@ -1,6 +1,6 @@
 import { CliError, EXIT, usage } from "./errors.js";
 import {
-  SKILL_AGENTS, SKILL_TARGETS, inspectSkill, installSkill, readBundledSkill, resolveTargets, uninstallSkill, BUNDLED_SKILL_PATH,
+  SKILL_AGENTS, SKILL_TARGETS, inspectSkill, installSkill, readBundledSkill, resolveTargets, restoreSkill, snapshotSkill, uninstallSkill, BUNDLED_SKILL_PATH,
 } from "./skill.js";
 
 const BOARD_REVISION = /^board:[1-9][0-9]*$/;
@@ -13,6 +13,7 @@ const FOCUS = ["primary", "secondary", "tertiary"];
 const boardRevision = { type: "string", value: "board:N", describe: "Fail with CONFLICT unless the board is still at this revision", validate: validateBoardRevision };
 const color = { type: "string", value: "HEX", describe: "Six-digit hex color, e.g. #3b82f6" };
 const colorId = { type: "string", value: "ID", describe: "Palette color ID (see `workgrid appearance get`)" };
+const updateRevision = { ...boardRevision, describe: "Fail with CONFLICT unless the board is still at this revision (default: the revision read just before updating)" };
 const yes = { type: "boolean", describe: "Confirm this permanent, destructive action" };
 const anchor = (noun) => ({
   before: { type: "string", value: "ID", describe: `Place before this ${noun}`, validate: validateId },
@@ -69,13 +70,17 @@ export const COMMANDS = [
   },
   {
     path: ["people", "update"], args: ["PERSON_ID"], summary: "Change a person's fields (others are preserved)",
-    options: { name: { type: "string", describe: "New display name" }, role: { type: "string", describe: "New role (\"\" clears it)" }, color, "color-id": colorId },
+    options: { name: { type: "string", describe: "New display name" }, role: { type: "string", describe: "New role (\"\" clears it)" }, color, "color-id": colorId, "expected-revision": updateRevision },
     requireSomeOption: true,
     format: "mutation",
     run: async ({ client, args: [id], options }) => {
-      const current = (await client.get()).people?.find((person) => person.id === id);
+      const board = await client.get();
+      const current = board.people?.find((person) => person.id === id);
       if (!current) throw new CliError("NOT_FOUND", `Person ${id} not found.`, EXIT.NOT_FOUND, { field: "id" });
-      return client.post("updatePerson", compact({ id, name: options.name ?? current.name, role: options.role ?? current.role ?? "", color: options.color, colorId: options["color-id"] }));
+      // Omitted fields are filled from this read, so the write is pinned to its revision: a concurrent edit yields CONFLICT, not a silent overwrite.
+      return client.post("updatePerson", compact({
+        id, name: options.name ?? current.name, role: options.role ?? current.role ?? "", color: options.color, colorId: options["color-id"], expectedRevision: options["expected-revision"] ?? board.revision,
+      }));
     },
   },
   {
@@ -119,15 +124,17 @@ export const COMMANDS = [
   },
   {
     path: ["tasks", "update"], args: ["TASK_ID"], summary: "Change a task's fields (others are preserved)",
-    options: { title: { type: "string", describe: "New title" }, description: { type: "string", describe: "New description (\"\" clears it)" }, category: { type: "string", describe: "New category (\"\" clears it)" }, color, "color-id": colorId },
+    options: { title: { type: "string", describe: "New title" }, description: { type: "string", describe: "New description (\"\" clears it)" }, category: { type: "string", describe: "New category (\"\" clears it)" }, color, "color-id": colorId, "expected-revision": updateRevision },
     requireSomeOption: true,
     format: "mutation",
     run: async ({ client, args: [id], options }) => {
-      const current = (await client.get()).tasks?.find((task) => task.id === id);
+      const board = await client.get();
+      const current = board.tasks?.find((task) => task.id === id);
       if (!current) throw new CliError("NOT_FOUND", `Task ${id} not found.`, EXIT.NOT_FOUND, { field: "id" });
       // Color is omitted unless requested: the service preserves the existing color.
+      // Omitted fields are filled from this read, so the write is pinned to its revision: a concurrent edit yields CONFLICT, not a silent overwrite.
       return client.post("updateTask", compact({
-        id, title: options.title ?? current.title, description: options.description ?? current.description ?? "", category: options.category ?? current.category ?? "", color: options.color, colorId: options["color-id"],
+        id, title: options.title ?? current.title, description: options.description ?? current.description ?? "", category: options.category ?? current.category ?? "", color: options.color, colorId: options["color-id"], expectedRevision: options["expected-revision"] ?? board.revision,
       }));
     },
   },
@@ -190,7 +197,7 @@ export const COMMANDS = [
   },
   {
     path: ["bulk", "create"], summary: "Atomically create every line, only if all lines are valid",
-    options: { ...bulkInput, "idempotency-key": { type: "string", value: "KEY", required: true, describe: "8–128 chars, unique per logical batch; reuse it only to retry the same batch", validate: validateIdempotencyKey }, "expected-revision": boardRevision },
+    options: { ...bulkInput, "idempotency-key": { type: "string", value: "KEY", required: true, describe: "8–128 letters, digits, _ or -; unique per logical batch; reuse it only to retry the same batch", validate: validateIdempotencyKey }, "expected-revision": boardRevision },
     format: "bulkCreate",
     run: async ({ client, options, readInput }) => {
       const text = await readInput(options.file);
@@ -256,15 +263,30 @@ export const COMMANDS = [
   },
 ];
 
-/** All-or-nothing across targets: a dry run of every target must succeed before anything is written. */
+/**
+ * All-or-nothing across targets: every target is preflighted with a dry run, and if a write still
+ * fails part-way (disk full, permissions), targets already changed are restored from snapshots.
+ */
 async function applyToSkillTargets(options, paths, action) {
   const bundled = await readBundledSkill();
   const targets = resolveTargets(options.agent ?? "agents", options.scope ?? "user", paths);
   const settings = { force: options.force, dryRun: true };
   for (const target of targets) await action(target, bundled, settings);
   if (options["dry-run"]) return { targets: await Promise.all(targets.map((target) => action(target, bundled, settings))) };
+  const snapshots = await Promise.all(targets.map((target) => snapshotSkill(target)));
   const results = [];
-  for (const target of targets) results.push(await action(target, bundled, { force: options.force }));
+  try {
+    for (const target of targets) results.push(await action(target, bundled, { force: options.force }));
+  } catch (caught) {
+    const target = targets[results.length];
+    const error = caught instanceof CliError ? caught : new CliError("SKILL_WRITE_FAILED", `Could not update ${target.path} (${caught?.code ?? "unknown error"}).`, EXIT.FAILURE);
+    const failed = [];
+    for (let index = results.length - 1; index >= 0; index -= 1) {
+      try { await restoreSkill(targets[index], snapshots[index]); } catch { failed.push(targets[index].path); }
+    }
+    error.extra = { ...error.extra, details: { ...error.extra?.details, rolledBack: failed.length === 0, ...(failed.length ? { notRestored: failed } : {}) } };
+    throw error;
+  }
   return { targets: results };
 }
 
@@ -339,7 +361,8 @@ function validateNumber(value, name) {
   if (!/^[0-9]+(\.[0-9]+)?$/.test(value)) throw usage(`--${name} must be a number.`, { field: name });
 }
 function validateIdempotencyKey(value, name) {
-  if (value.length < 8 || value.length > 128 || !/^[\x21-\x7e]+$/.test(value)) throw usage(`--${name} must be 8–128 printable characters with no spaces.`, { field: name });
+  // Mirrors bulkCreateInputSchema in lib/bulk-capture.ts so a bad key fails before the preview request.
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(value)) throw usage(`--${name} must be 8–128 characters of letters, digits, _ or -.`, { field: name });
 }
 function toInteger(value) {
   return value === undefined ? undefined : Number(value);

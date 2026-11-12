@@ -48,6 +48,10 @@ export class D1BoardRepository implements BoardRepository {
       if (!Number(results[1]?.meta?.changes ?? results[1]?.changes ?? 0)) throw new ApplicationError("CONFLICT", "The board changed during the operation.", "expectedRevision");
       return;
     }
+    if ((command.action === "updateTask" || command.action === "updatePerson") && command.payload.expectedRevision) {
+      await this.updateAtRevision(command);
+      return;
+    }
     if (command.action === "reorderPeople") {
       await this.reorderPerson(command.payload);
       return;
@@ -58,6 +62,24 @@ export class D1BoardRepository implements BoardRepository {
     }
     await this.executeMutation(command);
     await this.db.prepare("UPDATE board_metadata SET revision = revision + 1 WHERE id = 1").run();
+  }
+
+  /** Applies an update only if the board is still at `expectedRevision`; the write and revision bump share one batch. */
+  private async updateAtRevision(command: Extract<BoardCommand, { action: "updateTask" | "updatePerson" }>) {
+    const expected = String(command.payload.expectedRevision);
+    const expectedNumber = Number(expected.slice("board:".length));
+    const gate = "AND (SELECT revision FROM board_metadata WHERE id = 1) = ?";
+    const update = command.action === "updateTask"
+      ? this.db.prepare(`UPDATE tasks SET title = ?, description = ?, category = ?, color = ?, color_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? ${gate}`).bind(command.payload.title, command.payload.description, command.payload.category || "General", command.payload.color!, command.payload.colorId ?? null, command.payload.id, expectedNumber)
+      : this.db.prepare(`UPDATE people SET name = ?, role = ?, color = ?, color_id = ? WHERE id = ? ${gate}`).bind(command.payload.name, command.payload.role, command.payload.color!, command.payload.colorId ?? null, command.payload.id, expectedNumber);
+    const results = await this.db.batch([
+      update,
+      this.db.prepare("UPDATE board_metadata SET revision = revision + 1 WHERE id = 1 AND revision = ?").bind(expectedNumber),
+    ]);
+    if (!Number(results[1]?.meta?.changes ?? results[1]?.changes ?? 0)) {
+      const current = await this.db.prepare("SELECT revision FROM board_metadata WHERE id = 1").first<{ revision: number }>();
+      throw new ApplicationError("CONFLICT", "The board changed since it was read.", "expectedRevision", { currentRevision: `board:${current?.revision ?? expectedNumber}` });
+    }
   }
 
   private async executeMutation(command: Exclude<BoardCommand, { action: "reorderPeople" | "updateFocusSettings" }>) {

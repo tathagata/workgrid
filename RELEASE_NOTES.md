@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `tasks.update` and `people.update` accept an optional `expectedRevision`, enforced atomically with the write, so read-modify-write clients get `CONFLICT` instead of silently overwriting a concurrent edit.
 - Added the `workgrid` CLI (`work-distribution-grid-cli`), a zero-dependency client for the HTTP application service covering board, people, workload, tasks, assignments, settings, and atomic idempotent bulk capture.
   - It renders tables on a terminal and JSON envelopes when piped or with `--json`.
   - Help is available at every level, mistyped commands get suggestions, and `doctor` checks setup.
