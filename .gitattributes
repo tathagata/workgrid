@@ -1,0 +1,4 @@
+# The CLI, its skill, and workflows ship byte-identical on every OS (CI builds and tests on Windows).
+cli/** text=auto eol=lf
+.agents/** text=auto eol=lf
+.github/** text=auto eol=lf

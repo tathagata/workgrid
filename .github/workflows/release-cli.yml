@@ -1,0 +1,157 @@
+name: Release CLI
+
+# Builds work-distribution-grid-cli and publishes it as a GitHub Release when a `cli-vX.Y.Z`
+# tag is pushed. Nothing is published to the npm registry (package.json is `"private": true`).
+#
+# Release assets:
+#   workgrid-cli.tgz  npm-installable tarball (stable name so /releases/latest/download/ works)
+#   SHA256SUMS        checksum of the tarball
+# plus a signed SLSA build-provenance attestation, verifiable with `gh attestation verify`.
+#
+# Supply-chain posture:
+# - Every action is pinned to a full commit SHA (tags can be moved, as in the tj-actions incident).
+# - The release job runs only after tests pass and only for commits already on main.
+# - Zero runtime dependencies and `--ignore-scripts` everywhere: nothing third-party executes.
+# - Only the release job holds write permissions, and it never runs repository code after
+#   receiving them except the packed CLI's own `--version` smoke test.
+
+on:
+  push:
+    tags:
+      - "cli-v*"
+
+permissions: {}
+
+concurrency:
+  group: release-cli
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Verify tag matches package version
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(node --print "require('./package.json').version")"
+          if [ "$TAG" != "cli-v$version" ]; then
+            echo "::error::Tag $TAG does not match cli/package.json version $version"
+            exit 1
+          fi
+
+      - name: Verify the tagged commit is on main
+        shell: bash
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Release tags must point at a commit that is already on main."
+            exit 1
+          fi
+
+      - name: Test
+        run: npm test
+
+      - name: Verify package contents
+        run: npm run pack:check
+
+      - name: Build tarball
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/dist"
+          file="$(npm pack --ignore-scripts --silent --pack-destination "$RUNNER_TEMP/dist")"
+          mv "$RUNNER_TEMP/dist/$file" "$RUNNER_TEMP/dist/workgrid-cli.tgz"
+          cd "$RUNNER_TEMP/dist"
+          sha256sum workgrid-cli.tgz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Smoke-test the tarball
+        shell: bash
+        run: |
+          npm install --global --ignore-scripts "$RUNNER_TEMP/dist/workgrid-cli.tgz"
+          test "$(workgrid --version)" = "${GITHUB_REF_NAME#cli-v}"
+          HOME="$RUNNER_TEMP/home" workgrid skill install --agent all --json
+
+      - name: Upload build output
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cli-dist
+          path: ${{ runner.temp }}/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # sign the provenance attestation (Sigstore)
+      attestations: write # store the attestation
+    timeout-minutes: 10
+    steps:
+      - name: Download build output
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cli-dist
+          path: dist
+
+      - name: Verify checksum
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/workgrid-cli.tgz
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          version="${TAG#cli-v}"
+          cat > notes.md <<EOF
+          Install or upgrade:
+
+          \`\`\`sh
+          npm install --global https://github.com/${REPO}/releases/download/${TAG}/workgrid-cli.tgz
+          workgrid skill install --agent all
+          \`\`\`
+
+          Verify before installing:
+
+          \`\`\`sh
+          gh release download ${TAG} --repo ${REPO} --pattern 'workgrid-cli.tgz' --pattern SHA256SUMS
+          sha256sum --check SHA256SUMS        # macOS: shasum -a 256 --check SHA256SUMS
+          gh attestation verify workgrid-cli.tgz --repo ${REPO}
+          npm install --global --ignore-scripts ./workgrid-cli.tgz
+          \`\`\`
+          EOF
+          gh release create "$TAG" dist/workgrid-cli.tgz dist/SHA256SUMS \
+            --repo "$REPO" \
+            --verify-tag \
+            --title "Workgrid CLI ${version}" \
+            --notes-file notes.md \
+            --generate-notes \
+            --latest
